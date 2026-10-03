@@ -1,0 +1,19 @@
+# Harness core maintenance binary
+scripts/bin/harness
+scripts/bin/harness.exe
+
+.agents/
+.harness-core/
+
+# Archaeologist runtime artifacts
+*.db
+*.db-wal
+*.db-shm
+lab/.vagrant/
+lab/.multipass/
+out/
+*.html
+
+
+docs/
+*.md
