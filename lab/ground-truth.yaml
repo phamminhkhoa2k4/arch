@@ -1,0 +1,145 @@
+# Lab ground-truth v1
+#
+# Each entry records the REAL (expected) state plus the reason. The rule engine 
+# is measured against this file: one wrong line = false-orphan or missed-orphan.
+#
+# Three traps :
+#   1. monthly_cron   — day-1-of-month cron; a 14-day window is not enough
+#   2. external_caller— service only accepts connections from another host (simulated)
+#   3. nginx_variable — route uses a variable in proxy_pass; must surface as a blind spot
+#
+# Target: a remote VPS over SSH (LAB_SSH)
+
+version: 1
+
+counts:
+  containers: 6
+  systemd_units: 4
+  cron_jobs: 6
+  nginx_routes: 2
+
+traps:
+  - monthly_cron
+  - external_caller
+  - nginx_variable
+
+components:
+  # ---------- Docker containers (6) ----------
+  - id: container-lab-web
+    kind: container
+    name: lab-web
+    expected: ACTIVE
+    reason: "nginx route /web/ proxy_pass tĩnh tới 127.0.0.1:8081 (deterministic)"
+
+  - id: container-lab-api
+    kind: container
+    name: lab-api
+    expected: ACTIVE
+    reason: "thực tế nhận traffic từ route /var/ qua biến $lab_backend — parser tĩnh sẽ phải blind spot, không được kết luận không dùng"
+    trap: nginx_variable
+
+  - id: container-lab-cache
+    kind: container
+    name: lab-cache
+    expected: ACTIVE
+    reason: "backup.sh (cron daily 02:30) gọi redis-cli 127.0.0.1:6379"
+
+  - id: container-lab-helper
+    kind: container
+    name: lab-helper
+    expected: ACTIVE
+    reason: "compose depends_on của lab-web"
+
+  - id: container-lab-worker
+    kind: container
+    name: lab-worker
+    expected: ORPHANED
+    reason: "không route, không cron, không depends_on, không observations"
+
+  - id: container-lab-old-app
+    kind: container
+    name: lab-old-app
+    expected: ORPHANED
+    reason: "không tham chiếu nào từ thành phần khác"
+
+  # ---------- systemd units (4) ----------
+  - id: unit-lab-app
+    kind: systemd_unit
+    name: lab-app.service
+    expected: ACTIVE
+    reason: "monitor.sh (root crontab, mỗi 5 phút) curl 127.0.0.1:9099"
+
+  - id: unit-lab-external-api
+    kind: systemd_unit
+    name: lab-external-api.service
+    expected: ACTIVE
+    reason: "chỉ nhận kết nối từ host khác — caller ngoại bộ không hiện diện trên máy; local evidence không thấy caller là BÌNH THƯỜNG"
+    trap: external_caller
+    must_not_verdict: [LIKELY_ORPHANED, ORPHANED]
+    must_not_verdict_note: "khi observation window chưa đủ (mặc định 14 ngày), verdict phải là UNKNOWN chứ không bao giờ orphan"
+
+  - id: unit-lab-batch
+    kind: systemd_unit
+    name: lab-batch.service
+    expected: ACTIVE
+    reason: "backup.sh (cron daily) chạy systemctl start lab-batch.service"
+
+  - id: unit-lab-legacy
+    kind: systemd_unit
+    name: lab-legacy.service
+    expected: ORPHANED
+    reason: "enabled nhưng không active, không unit/cron/route nào tham chiếu"
+
+  # ---------- Cron jobs (6) ----------
+  - id: cron-heartbeat
+    kind: cron_job
+    name: "heartbeat ( /etc/crontab :17 hourly )"
+    expected: ACTIVE
+    reason: "ghi /var/log/lab-heartbeat.log — có log activity"
+
+  - id: cron-backup
+    kind: cron_job
+    name: "lab-backup (/etc/cron.d, 02:30 daily)"
+    expected: ACTIVE
+    reason: "gọi backup.sh tham chiếu lab-cache + lab-batch"
+
+  - id: cron-monthly
+    kind: cron_job
+    name: "lab-monthly (/etc/cron.d, 0 0 1 * *)"
+    expected: ACTIVE
+    reason: "chạy lúc 00:00 ngày 1 hàng tháng — job hợp lệ, KHÔNG phải rác"
+    trap: monthly_cron
+    must_not_verdict: [LIKELY_ORPHANED, ORPHANED]
+    must_not_verdict_note: "cửa sổ quan sát 14 ngày không bao phủ chu kỳ 30 ngày; mục tiêu của nó bị cron này che chắn cũng không được orphan trong khi chưa đủ cửa sổ"
+
+  - id: cron-monitor
+    kind: cron_job
+    name: "monitor (root crontab, */5)"
+    expected: ACTIVE
+    reason: "monitor.sh curl 127.0.0.1:9099 mỗi 5 phút"
+
+  - id: cron-rotate-logs
+    kind: cron_job
+    name: "rotate-logs (root crontab, 06:00 Sunday)"
+    expected: ACTIVE
+    reason: "script tồn tại, lịch hợp lệ, chạy hàng tuần"
+
+  - id: cron-boot
+    kind: cron_job
+    name: "lab-boot (/etc/cron.d, @reboot)"
+    expected: ACTIVE
+    reason: "macro @reboot — test parser macro (US-5.1)"
+
+  # ---------- nginx routes (2) ----------
+  - id: route-web
+    kind: nginx_route
+    name: "/web/ (port 8080)"
+    expected: ACTIVE
+    reason: "proxy_pass http://127.0.0.1:8081/ tĩnh → listener của lab-web, deterministic"
+
+  - id: route-var
+    kind: nginx_route
+    name: "/var/ (port 8080)"
+    expected: UNKNOWN
+    reason: "proxy_pass http://$lab_backend/ dùng biến — collector bắt buộc ghi blind_spot, không được đoán đích; thực tế biến set thành 127.0.0.1:8082 (lab-api) nhưng static analysis không được tự tin hơn thế"
+    trap: nginx_variable

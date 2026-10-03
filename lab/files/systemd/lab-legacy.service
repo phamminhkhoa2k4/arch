@@ -1,0 +1,10 @@
+[Unit]
+Description=Lab legacy — enabled but inactive, no one to use as a reference (ORPHANED)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lab/scripts/legacy.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Lab app — listener 9099, It is curl by monitor.sh every 5 minutes.
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/lab/scripts/app.sh
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

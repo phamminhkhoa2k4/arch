@@ -1,0 +1,2 @@
+# Lab cron — daily backup (references lab-cache + lab-batch through backup.sh).
+30 2 * * * root /opt/lab/scripts/backup.sh

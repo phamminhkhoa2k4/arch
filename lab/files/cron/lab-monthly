@@ -1,0 +1,2 @@
+# Lab cron — TRAP monthly_cron: day 1 of each month; a 14-day window is not enough.
+0 0 1 * * root /opt/lab/scripts/monthly-report.sh

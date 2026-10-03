@@ -1,0 +1,12 @@
+[Unit]
+Description=Lab batch — backup.sh (cron daily) start every day
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/lab/scripts/batch.sh
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

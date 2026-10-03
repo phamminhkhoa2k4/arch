@@ -1,0 +1,39 @@
+# Lab compose — ground-truth: lab/ground-truth.yaml (6 containers).
+# Idempotent: `docker compose up -d --remove-orphans` is safe to re-run.
+name: lab
+
+services:
+  web:
+    container_name: lab-web
+    image: nginx:1.27-alpine
+    ports:
+      - "8081:80"
+    depends_on:
+      - helper
+
+  api:
+    container_name: lab-api
+    image: nginx:1.27-alpine
+    ports:
+      - "8082:80"
+
+  cache:
+    container_name: lab-cache
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  helper:
+    container_name: lab-helper
+    image: alpine:3.20
+    command: ["sleep", "infinity"]
+
+  worker:
+    container_name: lab-worker
+    image: alpine:3.20
+    command: ["sleep", "infinity"]
+
+  old-app:
+    container_name: lab-old-app
+    image: alpine:3.20
+    command: ["sleep", "infinity"]

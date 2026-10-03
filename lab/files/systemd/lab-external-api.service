@@ -1,0 +1,12 @@
+[Unit]
+Description=Lab external API — TRAP: accepts connections only from other hosts; no local caller.
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/lab/scripts/external-api.sh
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
