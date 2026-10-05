@@ -61,7 +61,7 @@ func (mockCollector) Collect(_ context.Context, sink Sink) error {
 	})
 }
 
-// failingCollector simulates a permission error (US-0.2 AC).
+// failingCollector simulates a permission error.
 type failingCollector struct{}
 
 func (failingCollector) Name() string    { return "denied" }
@@ -70,7 +70,7 @@ func (failingCollector) Collect(context.Context, Sink) error {
 	return errors.New("permission denied reading /proc/999")
 }
 
-// US-0.2 AC 1: core runs any collector through the shared interface.
+// The core runs any collector through the shared interface.
 func TestRunCallsCollectorThroughInterface(t *testing.T) {
 	cs := []Collector{mockCollector{}}
 	sink := &mockSink{}
@@ -90,7 +90,7 @@ func TestRunCallsCollectorThroughInterface(t *testing.T) {
 	}
 }
 
-// US-0.2 AC 2: a failing collector becomes a blind spot, not a crash.
+// A failing collector becomes a blind spot, not a crash.
 func TestRunRecordsFailureAsBlindSpot(t *testing.T) {
 	sink := &mockSink{}
 	res, err := Run(context.Background(), []Collector{failingCollector{}}, sink)
@@ -112,7 +112,7 @@ func TestRunRecordsFailureAsBlindSpot(t *testing.T) {
 	}
 }
 
-// US-0.2 AC 3: every collector's Version feeds collector_versions_json.
+// Every collector's Version feeds collector_versions_json.
 func TestVersionsPayload(t *testing.T) {
 	got := Versions([]Collector{mockCollector{}, failingCollector{}})
 	if !strings.Contains(got, `"mock":"0.0.1"`) || !strings.Contains(got, `"denied":"0.0.1"`) {

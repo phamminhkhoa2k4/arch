@@ -10,7 +10,7 @@ import (
 // RunResult summarizes one collect pass.
 type RunResult struct {
 	// Failed lists collectors that returned an error; each failure is also
-	// recorded as a blind spot so the scan continues (US-0.2).
+	// recorded as a blind spot so the scan continues.
 	Failed []string
 }
 
@@ -36,8 +36,8 @@ func Versions(cs []Collector) string {
 // Run executes every collector against the sink.
 //
 // A collector error is converted into a blind spot (channel = collector name,
-// reason = error) and recorded in the result instead of aborting the scan —
-// US-0.2: "lỗi được ghi vào blind_spots thay vì làm crash toàn bộ scan".
+// reason = error) and recorded in the result instead of aborting the scan,
+// so one broken source never crashes the whole run.
 func Run(ctx context.Context, cs []Collector, sink Sink) (RunResult, error) {
 	var res RunResult
 	for _, c := range cs {

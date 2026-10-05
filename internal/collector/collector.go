@@ -1,6 +1,5 @@
 // Package collector defines the extension point for every data source.
 //
-// Authority: specs.md §5 (Collector framework), US-0.2.
 // The core scan loop only knows this interface; adding a source never
 // requires touching the core.
 package collector
@@ -8,7 +7,6 @@ package collector
 import "context"
 
 // Strength grades how trustworthy a link or piece of evidence is.
-// Authority: specs.md §4.1, US-0.1.
 type Strength string
 
 const (
@@ -18,7 +16,6 @@ const (
 )
 
 // Polarity is the direction of an evidence signal.
-// Authority: specs.md §4.1, US-0.1.
 type Polarity string
 
 const (
@@ -31,8 +28,8 @@ const (
 type Entity struct {
 	Kind        string // e.g. "process", "systemd_unit", "container"
 	Name        string
-	IdentityKey string // deterministic key used for merging (specs.md §7.1)
-	Fingerprint string // stable across scans, used for diffing (US-1.1)
+	IdentityKey string // deterministic key used for merging
+	Fingerprint string // stable across scans, used for diffing
 	Attributes  map[string]string
 }
 
@@ -45,7 +42,8 @@ type Edge struct {
 	EvidenceRef    string // collector-local ref matching an Evidence.Ref
 }
 
-// Evidence is one traceable fact. RawRef must never be empty (INV-1).
+// Evidence is one traceable fact. RawRef must never be empty — every fact
+// has to point back at its source.
 type Evidence struct {
 	EntityIdentityKey string
 	Polarity          Polarity
@@ -57,7 +55,8 @@ type Evidence struct {
 	Ref               string // collector-local handle edges can point at
 }
 
-// BlindSpot records something the collector could not see (INV-4).
+// BlindSpot records something the collector could not see, so blindness is
+// reported instead of silently missing.
 type BlindSpot struct {
 	EntityIdentityKey string // "" for host-wide gaps
 	Channel           string
@@ -75,7 +74,6 @@ type Sink interface {
 }
 
 // Collector is implemented by every data source.
-// Authority: specs.md §5, US-0.2.
 type Collector interface {
 	Name() string
 	Version() string // recorded in scans.collector_versions_json
