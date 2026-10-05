@@ -1,5 +1,4 @@
 // Package cli wires the archaeologist command tree.
-// Authority: specs.md §11 (CLI contract), US-0.4.
 package cli
 
 import (

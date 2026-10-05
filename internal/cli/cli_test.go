@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// US-0.4 AC: --help lists all 8 subcommands with a short description.
+// --help lists all 8 subcommands with a short description.
 func TestHelpListsEightSubcommands(t *testing.T) {
 	root := rootCmd()
 	addCommands(root)
@@ -37,7 +37,7 @@ func TestHelpListsEightSubcommands(t *testing.T) {
 	}
 }
 
-// US-0.4 AC: exit code 2 on execution error (unknown command), 0 on success.
+// Exit code 2 on execution error (unknown command), 0 on success.
 func TestExitCodes(t *testing.T) {
 	root := rootCmd()
 	addCommands(root)
@@ -49,16 +49,16 @@ func TestExitCodes(t *testing.T) {
 	}
 }
 
-// Stub commands print which epic implements them (skeleton behavior).
-func TestScanStubMentionsEpic(t *testing.T) {
+// Stub commands say they are not implemented yet (skeleton behavior).
+func TestStubCommandsSayNotImplemented(t *testing.T) {
 	root := rootCmd()
 	addCommands(root)
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetErr(buf)
-	root.SetArgs([]string{"scan"})
+	root.SetArgs([]string{"observe"})
 	if err := root.Execute(); err != nil {
-		t.Fatalf("scan: %v", err)
+		t.Fatalf("observe: %v", err)
 	}
 	if !strings.Contains(buf.String(), "not implemented yet") {
 		t.Fatalf("stub output = %q", buf.String())
