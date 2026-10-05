@@ -16,7 +16,7 @@ func openTemp(t *testing.T) *Store {
 	return s
 }
 
-// US-0.1 AC: migration on an empty SQLite database creates every table.
+// Migration on an empty SQLite database creates every table.
 func TestMigrateCreatesAllTables(t *testing.T) {
 	s := openTemp(t)
 
@@ -50,7 +50,7 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 }
 
-// US-0.1 AC (positive): a valid evidence row with polarity and raw_ref inserts.
+// Positive: a valid evidence row with polarity and raw_ref inserts.
 func TestEvidenceValidRowAccepted(t *testing.T) {
 	s := openTemp(t)
 	ctx := context.Background()
@@ -60,7 +60,7 @@ func TestEvidenceValidRowAccepted(t *testing.T) {
 	}
 }
 
-// US-0.1 AC (negative): invalid polarity and empty raw_ref are rejected by
+// Negative: invalid polarity and empty raw_ref are rejected by
 // CHECK constraints — the diagnostic names the violated rule.
 func TestEvidenceConstraintsRejectInvalidRows(t *testing.T) {
 	s := openTemp(t)
@@ -82,7 +82,7 @@ func TestEvidenceConstraintsRejectInvalidRows(t *testing.T) {
 	}
 }
 
-// US-0.1 AC (negative): edge strength outside the allowed set is rejected.
+// Negative: edge strength outside the allowed set is rejected.
 func TestEdgeStrengthConstraint(t *testing.T) {
 	s := openTemp(t)
 	ctx := context.Background()

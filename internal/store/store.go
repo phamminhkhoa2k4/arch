@@ -1,6 +1,5 @@
 // Package store owns the SQLite persistence layer.
 //
-// Authority: specs.md §3 (schema) and ADR 0001 (evidence model).
 // The store is append-only per scan: evidence and edges are never rewritten.
 package store
 
@@ -106,6 +105,47 @@ func (s *Store) FinishScan(ctx context.Context, scanID int64, status string) err
 		now, status, scanID)
 	return err
 }
+
+// Summary is the per-scan rollup printed by the scan command.
+type Summary struct {
+	Entities   map[string]int // entity kind → count
+	BlindSpots int
+}
+
+// ScanSummary counts entities by kind and blind spots for one scan.
+func (s *Store) ScanSummary(ctx context.Context, scanID int64) (Summary, error) {
+	sum := Summary{Entities: map[string]int{}}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT kind, count(*) FROM entities WHERE scan_id = ? GROUP BY kind`,
+		scanID)
+	if err != nil {
+		return sum, fmt.Errorf("scan summary: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var kind string
+		var n int
+		if err := rows.Scan(&kind, &n); err != nil {
+			return sum, fmt.Errorf("scan summary: %w", err)
+		}
+		sum.Entities[kind] = n
+	}
+	if err := rows.Err(); err != nil {
+		return sum, fmt.Errorf("scan summary: %w", err)
+	}
+
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM blind_spots WHERE scan_id = ?`,
+		scanID).Scan(&sum.BlindSpots); err != nil {
+		return sum, fmt.Errorf("scan summary: %w", err)
+	}
+	return sum, nil
+}
+
+// DB exposes the handle for read-only diagnostics and tests that need
+// queries outside this package's API.
+func (s *Store) DB() *sql.DB { return s.db }
 
 // Close releases the database handle.
 func (s *Store) Close() error {
