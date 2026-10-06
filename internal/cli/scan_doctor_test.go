@@ -26,7 +26,8 @@ func TestScanRunsAgainstHostProc(t *testing.T) {
 		t.Fatalf("scan: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "status=") || !strings.Contains(out, "blind spots:") {
+	if !strings.Contains(out, "status=") || !strings.Contains(out, "blind spots:") ||
+		!strings.Contains(out, "findings:") {
 		t.Errorf("summary missing fields:\n%s", out)
 	}
 

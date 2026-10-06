@@ -13,8 +13,10 @@ import (
 	"archaeologist/internal/collector"
 	"archaeologist/internal/collector/listener"
 	"archaeologist/internal/collector/process"
+	sysd "archaeologist/internal/collector/systemd"
 	"archaeologist/internal/procfs"
 	"archaeologist/internal/store"
+	"archaeologist/internal/systemd"
 )
 
 // newScanCmd wires the real scan pipeline: open the database, run the
@@ -50,15 +52,29 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion string) error
 	}
 
 	fs := procfs.OSReader{}
-	// Order matters: the listener collector emits edges to process entities,
-	// so the process collector must run first.
-	cs := []collector.Collector{process.New(fs), listener.New(fs)}
+	bus := systemd.NewDBusBus()
+	loader := systemd.NewLoader(systemd.OSFS{})
+	// Order matters: the listener collector emits edges to process
+	// entities and the systemd collector reads the process snapshot, so
+	// both run after the process collector. The systemd collector needs
+	// the sink as its process index, but the sink only exists after the
+	// scan row is created — build the list twice (Versions needs only
+	// names/versions).
+	newCollectors := func(index sysd.ProcessIndex) []collector.Collector {
+		return []collector.Collector{
+			process.New(fs),
+			listener.New(fs),
+			sysd.New(bus, loader, index),
+		}
+	}
+	cs := newCollectors(nil)
 	scanID, err := st.InsertScan(ctx, hostID, toolVersion, collector.Versions(cs))
 	if err != nil {
 		return err
 	}
 
 	sink := store.NewScanSink(ctx, st, scanID)
+	cs = newCollectors(sink)
 	res, err := collector.Run(ctx, cs, sink)
 	if err != nil {
 		_ = st.FinishScan(ctx, scanID, "failed")
@@ -100,6 +116,9 @@ func printScanSummary(
 		}
 	}
 	if _, err := fmt.Fprintf(w, "  %-10s %d\n", "blind spots:", sum.BlindSpots); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "  %-10s %d\n", "findings:", sum.Findings); err != nil {
 		return err
 	}
 	if len(failed) > 0 {
