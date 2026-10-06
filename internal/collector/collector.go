@@ -64,6 +64,24 @@ type BlindSpot struct {
 	Detail            map[string]string
 }
 
+// Finding records a noteworthy configuration problem the collector
+// observed (a broken state that exists), unlike a BlindSpot which
+// records something the collector could not observe.
+type Finding struct {
+	EntityIdentityKey string
+	Kind              string // e.g. "DANGLING_DEPENDS"
+	Severity          string // "info" or "warn"
+	Detail            map[string]string
+	EvidenceRef       string // optional collector-local evidence handle
+}
+
+// ProcessRow is one process as seen through its cgroup attributes —
+// the input for unit/container ownership edges.
+type ProcessRow struct {
+	IdentityKey string
+	Unit        string // cgroup unit name, "" when outside systemd
+}
+
 // Sink receives collector output. Errors are returned to the caller so the
 // core can decide policy; collectors never write to the database directly.
 type Sink interface {
@@ -71,6 +89,7 @@ type Sink interface {
 	UpsertEdge(e Edge) error
 	AddEvidence(e Evidence) error
 	AddBlindSpot(b BlindSpot) error
+	AddFinding(f Finding) error
 }
 
 // Collector is implemented by every data source.

@@ -64,6 +64,7 @@ type recSink struct {
 	edges    []collector.Edge
 	evidence []collector.Evidence
 	blinds   []collector.BlindSpot
+	findings []collector.Finding
 }
 
 func newRecSink() *recSink { return &recSink{entities: map[string]collector.Entity{}} }
@@ -82,6 +83,10 @@ func (r *recSink) AddEvidence(e collector.Evidence) error {
 }
 func (r *recSink) AddBlindSpot(b collector.BlindSpot) error {
 	r.blinds = append(r.blinds, b)
+	return nil
+}
+func (r *recSink) AddFinding(f collector.Finding) error {
+	r.findings = append(r.findings, f)
 	return nil
 }
 
@@ -211,6 +216,7 @@ func (e *errSink) UpsertEntity(ent collector.Entity) error {
 }
 func (e *errSink) UpsertEdge(collector.Edge) error      { return nil }
 func (e *errSink) AddEvidence(collector.Evidence) error { return nil }
+func (e *errSink) AddFinding(collector.Finding) error   { return nil }
 func (e *errSink) AddBlindSpot(collector.BlindSpot) error {
 	return nil
 }

@@ -13,6 +13,7 @@ type mockSink struct {
 	edges      []Edge
 	evidence   []Evidence
 	blindSpots []BlindSpot
+	findings   []Finding
 	failOnAdd  bool
 }
 
@@ -36,6 +37,11 @@ func (m *mockSink) AddEvidence(e Evidence) error {
 
 func (m *mockSink) AddBlindSpot(b BlindSpot) error {
 	m.blindSpots = append(m.blindSpots, b)
+	return nil
+}
+
+func (m *mockSink) AddFinding(f Finding) error {
+	m.findings = append(m.findings, f)
 	return nil
 }
 

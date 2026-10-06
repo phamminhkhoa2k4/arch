@@ -62,6 +62,7 @@ type recSink struct {
 	edges    []collector.Edge
 	evidence []collector.Evidence
 	blinds   []collector.BlindSpot
+	findings []collector.Finding
 }
 
 func newRecSink() *recSink { return &recSink{entities: map[string]collector.Entity{}} }
@@ -80,6 +81,10 @@ func (r *recSink) AddEvidence(e collector.Evidence) error {
 }
 func (r *recSink) AddBlindSpot(b collector.BlindSpot) error {
 	r.blinds = append(r.blinds, b)
+	return nil
+}
+func (r *recSink) AddFinding(f collector.Finding) error {
+	r.findings = append(r.findings, f)
 	return nil
 }
 
@@ -227,7 +232,7 @@ func TestReusePortTwoSocketsSamePort(t *testing.T) {
 	f := newFake()
 	f.files["/proc/net/tcp"] = []byte(tcpHeader() +
 		row(0, "00000000:1F90", "0A", 0, 111) + // 0.0.0.0:8080 inode 111
-		row(1, "00000000:1F90", "0A", 0, 222))  // 0.0.0.0:8080 inode 222
+		row(1, "00000000:1F90", "0A", 0, 222)) // 0.0.0.0:8080 inode 222
 	f.files["/proc/net/tcp6"] = []byte(tcpHeader())
 
 	f.dirs["/proc"] = []string{"100", "101"}
