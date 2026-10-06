@@ -183,3 +183,70 @@ func (k *ScanSink) AddBlindSpot(b collector.BlindSpot) error {
 	}
 	return nil
 }
+
+// AddFinding records a noteworthy configuration problem for an entity
+// already known to this sink. EvidenceRef is optional (schema allows a
+// null evidence link) but must resolve when set.
+func (k *ScanSink) AddFinding(f collector.Finding) error {
+	if f.EntityIdentityKey == "" {
+		return fmt.Errorf("finding %s: empty entity key", f.Kind)
+	}
+	entityID, ok := k.entities[f.EntityIdentityKey]
+	if !ok {
+		return fmt.Errorf("finding %s: unknown entity %q", f.Kind, f.EntityIdentityKey)
+	}
+	var evidence any
+	if f.EvidenceRef != "" {
+		evID, ok := k.refs[f.EvidenceRef]
+		if !ok {
+			return fmt.Errorf("finding %s: unknown evidence ref %q", f.Kind, f.EvidenceRef)
+		}
+		evidence = evID
+	}
+	detail, err := jsonMap(f.Detail)
+	if err != nil {
+		return fmt.Errorf("finding %s: marshal detail: %w", f.Kind, err)
+	}
+	_, err = k.s.db.ExecContext(k.ctx,
+		`INSERT INTO findings (scan_id, entity_id, kind, severity, detail_json, evidence_id)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		k.scanID, entityID, f.Kind, f.Severity, detail, evidence)
+	if err != nil {
+		return fmt.Errorf("finding %s: %w", f.Kind, err)
+	}
+	return nil
+}
+
+// ProcessRowsByUnit groups this scan's processes by their cgroup unit
+// attribute — the input for unit ownership edges. Processes without a
+// unit (outside systemd) are omitted.
+func (k *ScanSink) ProcessRowsByUnit() (map[string][]collector.ProcessRow, error) {
+	rows, err := k.s.db.QueryContext(k.ctx,
+		`SELECT identity_key, attributes_json FROM entities
+		 WHERE scan_id = ? AND kind = 'process'`, k.scanID)
+	if err != nil {
+		return nil, fmt.Errorf("process rows: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string][]collector.ProcessRow{}
+	for rows.Next() {
+		var key, attrsJSON string
+		if err := rows.Scan(&key, &attrsJSON); err != nil {
+			return nil, fmt.Errorf("process rows scan: %w", err)
+		}
+		var attrs map[string]string
+		if err := json.Unmarshal([]byte(attrsJSON), &attrs); err != nil {
+			continue // attributes produced elsewhere may not be a map
+		}
+		unit := attrs["unit"]
+		if unit == "" {
+			continue
+		}
+		out[unit] = append(out[unit], collector.ProcessRow{IdentityKey: key, Unit: unit})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("process rows: %w", err)
+	}
+	return out, nil
+}

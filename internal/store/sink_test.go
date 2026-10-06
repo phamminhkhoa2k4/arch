@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -251,5 +252,152 @@ func TestSinkNilMapsMarshalAsEmptyObject(t *testing.T) {
 		if got != "{}" {
 			t.Errorf("%s = %q, want {}", name, got)
 		}
+	}
+}
+
+// Findings persist with entity + optional evidence link; unknown refs and
+// schema-incompatible kinds/severities are rejected at the boundary.
+func TestSinkAddFinding(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+
+	t.Run("full chain", func(t *testing.T) {
+		k := newScan(t, s)
+		if err := k.UpsertEntity(procEntity("p1")); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+		if err := k.AddEvidence(collector.Evidence{
+			EntityIdentityKey: "p1", Polarity: collector.PolarityNeutral,
+			Channel: "unit_file", Strength: collector.StrengthDeterministic,
+			ObservedAt: now(), RawRef: "/lib/systemd/system/a.service:12", Ref: "ev1",
+		}); err != nil {
+			t.Fatalf("evidence: %v", err)
+		}
+		if err := k.AddFinding(collector.Finding{
+			EntityIdentityKey: "p1", Kind: "DANGLING_DEPENDS", Severity: "warn",
+			EvidenceRef: "ev1", Detail: map[string]string{"missing": "ghost.service"},
+		}); err != nil {
+			t.Fatalf("add finding: %v", err)
+		}
+
+		var kind, sev, detail string
+		var ev sql.NullInt64
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT kind, severity, detail_json, evidence_id FROM findings`).Scan(
+			&kind, &sev, &detail, &ev); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if kind != "DANGLING_DEPENDS" || sev != "warn" {
+			t.Errorf("kind/sev = %q/%q", kind, sev)
+		}
+		if detail != `{"missing":"ghost.service"}` {
+			t.Errorf("detail = %s", detail)
+		}
+		if !ev.Valid {
+			t.Error("evidence_id must link the finding")
+		}
+	})
+
+	t.Run("evidence link is optional", func(t *testing.T) {
+		k := newScan(t, s)
+		if err := k.UpsertEntity(procEntity("p2")); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+		if err := k.AddFinding(collector.Finding{
+			EntityIdentityKey: "p2", Kind: "DANGLING_DEPENDS", Severity: "info",
+		}); err != nil {
+			t.Fatalf("add finding without evidence: %v", err)
+		}
+	})
+
+	t.Run("unknown entity rejected", func(t *testing.T) {
+		k := newScan(t, s)
+		err := k.AddFinding(collector.Finding{
+			EntityIdentityKey: "ghost", Kind: "DANGLING_DEPENDS", Severity: "warn",
+		})
+		if err == nil || !strings.Contains(err.Error(), "unknown entity") {
+			t.Errorf("got %v, want unknown entity error", err)
+		}
+	})
+
+	t.Run("unknown evidence ref rejected", func(t *testing.T) {
+		k := newScan(t, s)
+		if err := k.UpsertEntity(procEntity("p3")); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+		err := k.AddFinding(collector.Finding{
+			EntityIdentityKey: "p3", Kind: "DANGLING_DEPENDS", Severity: "warn",
+			EvidenceRef: "missing",
+		})
+		if err == nil || !strings.Contains(err.Error(), "evidence ref") {
+			t.Errorf("got %v, want evidence ref error", err)
+		}
+	})
+
+	t.Run("kind outside schema check rejected", func(t *testing.T) {
+		k := newScan(t, s)
+		if err := k.UpsertEntity(procEntity("p4")); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+		err := k.AddFinding(collector.Finding{
+			EntityIdentityKey: "p4", Kind: "NOT_A_KIND", Severity: "warn",
+		})
+		if err == nil || !strings.Contains(err.Error(), "CHECK") {
+			t.Errorf("got %v, want CHECK constraint error", err)
+		}
+	})
+
+	t.Run("severity outside schema check rejected", func(t *testing.T) {
+		k := newScan(t, s)
+		if err := k.UpsertEntity(procEntity("p5")); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+		err := k.AddFinding(collector.Finding{
+			EntityIdentityKey: "p5", Kind: "DANGLING_DEPENDS", Severity: "critical",
+		})
+		if err == nil || !strings.Contains(err.Error(), "CHECK") {
+			t.Errorf("got %v, want CHECK constraint error", err)
+		}
+	})
+}
+
+// Processes group by their cgroup unit attribute; rows outside systemd
+// (no unit) are omitted so no process ever gains a guessed owner.
+func TestProcessRowsByUnit(t *testing.T) {
+	s := openTemp(t)
+	k := newScan(t, s)
+
+	procs := []collector.Entity{
+		{Kind: "process", Name: "app", IdentityKey: "process|100|1", Fingerprint: "f",
+			Attributes: map[string]string{"unit": "app.service"}},
+		{Kind: "process", Name: "app2", IdentityKey: "process|101|1", Fingerprint: "f",
+			Attributes: map[string]string{"unit": "app.service"}},
+		{Kind: "process", Name: "bare", IdentityKey: "process|102|1", Fingerprint: "f",
+			Attributes: map[string]string{"pid": "102"}},
+		{Kind: "listener", Name: ":80", IdentityKey: "listener|tcp|0.0.0.0|80",
+			Fingerprint: "f", Attributes: map[string]string{"unit": "app.service"}},
+	}
+	for _, p := range procs {
+		if err := k.UpsertEntity(p); err != nil {
+			t.Fatalf("upsert %s: %v", p.IdentityKey, err)
+		}
+	}
+
+	got, err := k.ProcessRowsByUnit()
+	if err != nil {
+		t.Fatalf("rows by unit: %v", err)
+	}
+	rows := got["app.service"]
+	if len(rows) != 2 {
+		t.Fatalf("app.service rows = %+v, want 2 processes", rows)
+	}
+	if rows[0].IdentityKey == "" || rows[0].Unit != "app.service" {
+		t.Errorf("row = %+v", rows[0])
+	}
+	if _, ok := got[""]; ok {
+		t.Error("unitless process must be omitted, not grouped under empty key")
+	}
+	if len(got) != 1 {
+		t.Errorf("got %d unit groups, want only app.service", len(got))
 	}
 }

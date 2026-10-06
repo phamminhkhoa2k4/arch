@@ -110,9 +110,11 @@ func (s *Store) FinishScan(ctx context.Context, scanID int64, status string) err
 type Summary struct {
 	Entities   map[string]int // entity kind → count
 	BlindSpots int
+	Findings   int
 }
 
-// ScanSummary counts entities by kind and blind spots for one scan.
+// ScanSummary counts entities by kind plus blind spots and findings for
+// one scan.
 func (s *Store) ScanSummary(ctx context.Context, scanID int64) (Summary, error) {
 	sum := Summary{Entities: map[string]int{}}
 
@@ -138,6 +140,11 @@ func (s *Store) ScanSummary(ctx context.Context, scanID int64) (Summary, error) 
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT count(*) FROM blind_spots WHERE scan_id = ?`,
 		scanID).Scan(&sum.BlindSpots); err != nil {
+		return sum, fmt.Errorf("scan summary: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM findings WHERE scan_id = ?`,
+		scanID).Scan(&sum.Findings); err != nil {
 		return sum, fmt.Errorf("scan summary: %w", err)
 	}
 	return sum, nil
