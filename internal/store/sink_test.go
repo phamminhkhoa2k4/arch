@@ -391,7 +391,7 @@ func TestProcessRowsByUnit(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("app.service rows = %+v, want 2 processes", rows)
 	}
-	if rows[0].IdentityKey == "" || rows[0].Unit != "app.service" {
+	if rows[0].IdentityKey == "" || rows[0].Owner != "app.service" {
 		t.Errorf("row = %+v", rows[0])
 	}
 	if _, ok := got[""]; ok {
@@ -399,5 +399,75 @@ func TestProcessRowsByUnit(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Errorf("got %d unit groups, want only app.service", len(got))
+	}
+}
+
+// Processes group by cgroup container id; processes outside any
+// container are omitted so nothing gains a guessed owner.
+func TestProcessRowsByContainer(t *testing.T) {
+	s := openTemp(t)
+	k := newScan(t, s)
+
+	procs := []collector.Entity{
+		{Kind: "process", Name: "in-a", IdentityKey: "process|200|1", Fingerprint: "f",
+			Attributes: map[string]string{"container_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+		{Kind: "process", Name: "in-a-2", IdentityKey: "process|201|1", Fingerprint: "f",
+			Attributes: map[string]string{"container_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+		{Kind: "process", Name: "bare", IdentityKey: "process|202|1", Fingerprint: "f",
+			Attributes: map[string]string{"pid": "202"}},
+		{Kind: "process", Name: "in-b", IdentityKey: "process|203|1", Fingerprint: "f",
+			Attributes: map[string]string{"container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+	}
+	for _, p := range procs {
+		if err := k.UpsertEntity(p); err != nil {
+			t.Fatalf("upsert %s: %v", p.IdentityKey, err)
+		}
+	}
+
+	got, err := k.ProcessRowsByContainer()
+	if err != nil {
+		t.Fatalf("rows by container: %v", err)
+	}
+	a := got["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+	if len(a) != 2 {
+		t.Fatalf("container a rows = %+v, want 2", a)
+	}
+	if a[0].Owner != a[0].IdentityKey && a[0].Owner == "" {
+		t.Errorf("owner = %q, want container id", a[0].Owner)
+	}
+	if _, ok := got[""]; ok {
+		t.Error("containerless process must be omitted")
+	}
+	if len(got) != 2 {
+		t.Errorf("got %d groups, want 2", len(got))
+	}
+}
+
+// ListenerRows exposes identity keys for published-port matching.
+func TestListenerRows(t *testing.T) {
+	s := openTemp(t)
+	k := newScan(t, s)
+
+	for _, e := range []collector.Entity{
+		{Kind: "listener", Name: "0.0.0.0:8081",
+			IdentityKey: "listener|tcp|0.0.0.0|8081|11", Fingerprint: "f"},
+		{Kind: "listener", Name: "127.0.0.1:6379",
+			IdentityKey: "listener|tcp|127.0.0.1|6379|22", Fingerprint: "f"},
+		{Kind: "process", Name: "p", IdentityKey: "process|1|1", Fingerprint: "f"},
+	} {
+		if err := k.UpsertEntity(e); err != nil {
+			t.Fatalf("upsert %s: %v", e.IdentityKey, err)
+		}
+	}
+
+	rows, err := k.ListenerRows()
+	if err != nil {
+		t.Fatalf("listener rows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d listener rows, want 2", len(rows))
+	}
+	if rows[0].IdentityKey != "listener|tcp|0.0.0.0|8081|11" || rows[0].Name != "0.0.0.0:8081" {
+		t.Errorf("row[0] = %+v", rows[0])
 	}
 }

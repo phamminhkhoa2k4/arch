@@ -79,7 +79,14 @@ type Finding struct {
 // the input for unit/container ownership edges.
 type ProcessRow struct {
 	IdentityKey string
-	Unit        string // cgroup unit name, "" when outside systemd
+	Owner       string // cgroup owner: systemd unit name or container id, "" outside
+}
+
+// ListenerRow is one listener recorded in the scan — the input for
+// published-port matching (docker).
+type ListenerRow struct {
+	IdentityKey string
+	Name        string // display name, e.g. "0.0.0.0:8081"
 }
 
 // Sink receives collector output. Errors are returned to the caller so the

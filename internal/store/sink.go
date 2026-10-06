@@ -243,10 +243,69 @@ func (k *ScanSink) ProcessRowsByUnit() (map[string][]collector.ProcessRow, error
 		if unit == "" {
 			continue
 		}
-		out[unit] = append(out[unit], collector.ProcessRow{IdentityKey: key, Unit: unit})
+		out[unit] = append(out[unit], collector.ProcessRow{IdentityKey: key, Owner: unit})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("process rows: %w", err)
+	}
+	return out, nil
+}
+
+// ProcessRowsByContainer groups this scan's processes by their cgroup
+// container id — the input for container ownership edges. Processes
+// outside any container are omitted.
+func (k *ScanSink) ProcessRowsByContainer() (map[string][]collector.ProcessRow, error) {
+	rows, err := k.s.db.QueryContext(k.ctx,
+		`SELECT identity_key, attributes_json FROM entities
+		 WHERE scan_id = ? AND kind = 'process'`, k.scanID)
+	if err != nil {
+		return nil, fmt.Errorf("process rows: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string][]collector.ProcessRow{}
+	for rows.Next() {
+		var key, attrsJSON string
+		if err := rows.Scan(&key, &attrsJSON); err != nil {
+			return nil, fmt.Errorf("process rows scan: %w", err)
+		}
+		var attrs map[string]string
+		if err := json.Unmarshal([]byte(attrsJSON), &attrs); err != nil {
+			continue
+		}
+		id := attrs["container_id"]
+		if id == "" {
+			continue
+		}
+		out[id] = append(out[id], collector.ProcessRow{IdentityKey: key, Owner: id})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("process rows: %w", err)
+	}
+	return out, nil
+}
+
+// ListenerRows returns every listener of this scan with its identity
+// key and display name — the input for published-port matching.
+func (k *ScanSink) ListenerRows() ([]collector.ListenerRow, error) {
+	rows, err := k.s.db.QueryContext(k.ctx,
+		`SELECT identity_key, name FROM entities
+		 WHERE scan_id = ? AND kind = 'listener' ORDER BY identity_key`, k.scanID)
+	if err != nil {
+		return nil, fmt.Errorf("listener rows: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []collector.ListenerRow
+	for rows.Next() {
+		var key, name string
+		if err := rows.Scan(&key, &name); err != nil {
+			return nil, fmt.Errorf("listener rows scan: %w", err)
+		}
+		out = append(out, collector.ListenerRow{IdentityKey: key, Name: name})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listener rows: %w", err)
 	}
 	return out, nil
 }

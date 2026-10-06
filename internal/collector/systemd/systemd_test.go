@@ -291,9 +291,9 @@ func TestCollectDependsOnEdgeWhenTargetPresent(t *testing.T) {
 // cgroup names an unlisted unit are left alone (no guessed owner).
 func TestCollectManagesEdgesFromIndex(t *testing.T) {
 	idx := &fakeIndex{rows: map[string][]collector.ProcessRow{
-		"lab-app.service":    {{IdentityKey: "process|100|555", Unit: "lab-app.service"}},
-		"session-2.scope":    {{IdentityKey: "process|200|777", Unit: "session-2.scope"}},
-		"not-listed.service": {{IdentityKey: "process|300|888", Unit: "not-listed.service"}},
+		"lab-app.service":    {{IdentityKey: "process|100|555", Owner: "lab-app.service"}},
+		"session-2.scope":    {{IdentityKey: "process|200|777", Owner: "session-2.scope"}},
+		"not-listed.service": {{IdentityKey: "process|300|888", Owner: "not-listed.service"}},
 		"":                   {{IdentityKey: "process|400|999"}}, // outside systemd: no unit key at all
 	}}
 	sink := newRecSink()
