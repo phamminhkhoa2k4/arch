@@ -11,9 +11,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"archaeologist/internal/collector"
+	dcoll "archaeologist/internal/collector/docker"
 	"archaeologist/internal/collector/listener"
 	"archaeologist/internal/collector/process"
 	sysd "archaeologist/internal/collector/systemd"
+	"archaeologist/internal/compose"
+	dengine "archaeologist/internal/docker"
 	"archaeologist/internal/procfs"
 	"archaeologist/internal/store"
 	"archaeologist/internal/systemd"
@@ -56,15 +59,28 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion string) error
 	loader := systemd.NewLoader(systemd.OSFS{})
 	// Order matters: the listener collector emits edges to process
 	// entities and the systemd collector reads the process snapshot, so
-	// both run after the process collector. The systemd collector needs
-	// the sink as its process index, but the sink only exists after the
-	// scan row is created — build the list twice (Versions needs only
+	// both run after the process collector. The docker collector matches
+	// published ports against listeners and cgroup container ids, so it
+	// runs last. The systemd and docker collectors need the sink as
+	// their index, but the sink only exists after the scan row is
+	// created — build the list twice (Versions needs only
 	// names/versions).
-	newCollectors := func(index sysd.ProcessIndex) []collector.Collector {
+	type scanIndex interface {
+		sysd.ProcessIndex
+		dcoll.Index
+	}
+	newCollectors := func(index scanIndex) []collector.Collector {
+		var sIdx sysd.ProcessIndex
+		var dIdx dcoll.Index
+		if index != nil {
+			sIdx = index
+			dIdx = index
+		}
 		return []collector.Collector{
 			process.New(fs),
 			listener.New(fs),
-			sysd.New(bus, loader, index),
+			sysd.New(bus, loader, sIdx),
+			dcoll.New(dengine.NewClient(dengine.DefaultSocket), compose.NewLoader(), dIdx),
 		}
 	}
 	cs := newCollectors(nil)
