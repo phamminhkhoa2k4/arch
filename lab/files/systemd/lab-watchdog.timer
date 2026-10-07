@@ -1,0 +1,9 @@
+[Unit]
+Description=Lab watchdog timer (E5 ground truth: 1 systemd timer)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Unit=lab-batch.service
+
+[Install]
+WantedBy=timers.target

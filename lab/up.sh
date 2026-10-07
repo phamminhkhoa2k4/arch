@@ -89,22 +89,26 @@ mkdir -p /tmp 2>/dev/null || true
 tar -C "$SCRIPT_DIR/files" -cf - . | \
   ssh "${SSH_OPTS[@]}" "$LAB_SSH" 'sudo -n mkdir -p /opt/lab && sudo -n tar -C /opt/lab -xf - && echo "OK payload copied"'
 
-step "4/7 systemd units (4)"
+step "4/7 systemd units (4) + timer (1)"
 run <<'EOF'
 set -euo pipefail
 chmod +x /opt/lab/scripts/*.sh
 install -m 644 /opt/lab/systemd/*.service /etc/systemd/system/
+install -m 644 /opt/lab/systemd/*.timer /etc/systemd/system/
 systemctl daemon-reload
 # 3 unit active: enable --now (idempotent)
 systemctl enable --now lab-app.service lab-external-api.service lab-batch.service >/dev/null 2>&1
 # lab-legacy: BẬT enable, KHÔNG start → ground truth ORPHANED
 systemctl enable lab-legacy.service >/dev/null 2>&1
+# timer: enable --now (idempotent) → ground truth ACTIVE
+systemctl enable --now lab-watchdog.timer >/dev/null 2>&1
 for u in lab-app lab-external-api lab-batch; do
   systemctl is-active --quiet "$u.service" || { echo "FAIL: $u not active"; exit 1; }
 done
 systemctl is-enabled --quiet lab-legacy.service || { echo "FAIL: lab-legacy not enabled"; exit 1; }
 systemctl is-active --quiet lab-legacy.service && { echo "FAIL: lab-legacy must stay inactive"; exit 1; } || true
-echo "OK 4 units"
+systemctl is-active --quiet lab-watchdog.timer || { echo "FAIL: lab-watchdog.timer not active"; exit 1; }
+echo "OK 4 units + 1 timer"
 EOF
 
 step "5/7 cron jobs (6)"
@@ -115,16 +119,17 @@ install -m 644 /opt/lab/cron/lab-backup /opt/lab/cron/lab-monthly /opt/lab/cron/
 # 1 line in /etc/crontab (append when missing)
 grep -qF '/opt/lab/scripts/heartbeat.sh' /etc/crontab ||
   echo '17 * * * * root /opt/lab/scripts/heartbeat.sh' >>/etc/crontab
-# 2 lines in root's crontab (append when missing)
+# 2 lines in root's crontab (append when missing); rotate-logs-gone.sh
+# intentionally does NOT exist → ground truth ORPHAN_CRON (US-5.4)
 cur="$(crontab -l 2>/dev/null || true)"
 add=false
 printf '%s\n' "$cur" | grep -qF '/opt/lab/scripts/monitor.sh' || add=true
-printf '%s\n' "$cur" | grep -qF '/opt/lab/scripts/rotate-logs.sh' || add=true
+printf '%s\n' "$cur" | grep -qF '/opt/lab/scripts/rotate-logs-gone.sh' || add=true
 if $add; then
   {
     printf '%s\n' "$cur"
     printf '%s\n' '*/5 * * * * /opt/lab/scripts/monitor.sh'
-    printf '%s\n' '0 6 * * 0 /opt/lab/scripts/rotate-logs.sh'
+    printf '%s\n' '0 6 * * 0 /opt/lab/scripts/rotate-logs-gone.sh'
   } | grep -v '^$' | crontab -
 fi
 echo "OK 6 cron entries"

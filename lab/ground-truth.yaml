@@ -15,6 +15,7 @@ version: 1
 counts:
   containers: 6
   systemd_units: 4
+  timers: 1
   cron_jobs: 6
   nginx_routes: 5
   nginx_upstreams: 1
@@ -121,15 +122,22 @@ components:
 
   - id: cron-rotate-logs
     kind: cron_job
-    name: "rotate-logs (root crontab, 06:00 Sunday)"
-    expected: ACTIVE
-    reason: "script tồn tại, lịch hợp lệ, chạy hàng tuần"
+    name: "rotate-logs-gone (root crontab, 06:00 Sunday)"
+    expected: ORPHANED
+    reason: "lịch weekly vẫn parse; script /opt/lab/scripts/rotate-logs-gone.sh không tồn tại → ORPHAN_CRON (US-5.4)"
 
   - id: cron-boot
     kind: cron_job
     name: "lab-boot (/etc/cron.d, @reboot)"
     expected: ACTIVE
     reason: "macro @reboot — test parser macro (US-5.1)"
+
+  # ---------- systemd timer (1) ----------
+  - id: timer-lab-watchdog
+    kind: timer
+    name: lab-watchdog.timer
+    expected: ACTIVE
+    reason: "OnCalendar 03:30 daily → period 1 ngày; Unit=lab-batch.service → cạnh scheduled_by (US-5.1)"
 
   # ---------- nginx routes (5) + upstream (1) ----------
   - id: route-web

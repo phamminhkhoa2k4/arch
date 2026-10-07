@@ -35,6 +35,7 @@ SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10)
 # Must match the counts in lab/ground-truth.yaml
 EXPECTED_CONTAINERS=6
 EXPECTED_UNITS=4
+EXPECTED_TIMERS=1
 EXPECTED_CRON=6
 EXPECTED_ROUTES=5
 
@@ -55,7 +56,10 @@ is() { [ "$1" = "$2" ]; }
 out="$(ssh "${SSH_OPTS[@]}" "$LAB_SSH" sudo -n bash -s <<'EOF'
 set -euo pipefail
 c_containers=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -c '^lab-' || true)
-c_units=$(ls /etc/systemd/system/lab-*.service 2>/dev/null | wc -l)
+c_units=$(ls /etc/systemd/system/lab-*.service 2>/dev/null | wc -l || true)
+c_timer=$(ls /etc/systemd/system/lab-*.timer 2>/dev/null | wc -l || true)
+timer_state="inactive"
+systemctl is-active --quiet lab-watchdog.timer && timer_state="active" || true
 c_active=0
 for u in lab-app lab-external-api lab-batch; do
   systemctl is-active --quiet "$u.service" && c_active=$((c_active+1)) || true
@@ -72,7 +76,7 @@ done
 grep -qF '/opt/lab/scripts/heartbeat.sh' /etc/crontab && c_cron=$((c_cron+1)) || true
 cr=$(crontab -l 2>/dev/null || true)
 printf '%s\n' "$cr" | grep -qF '/opt/lab/scripts/monitor.sh' && c_cron=$((c_cron+1)) || true
-printf '%s\n' "$cr" | grep -qF '/opt/lab/scripts/rotate-logs.sh' && c_cron=$((c_cron+1)) || true
+printf '%s\n' "$cr" | grep -qF '/opt/lab/scripts/rotate-logs-gone.sh' && c_cron=$((c_cron+1)) || true
 
 c_routes=0
 [ -f /etc/nginx/conf.d/lab.conf ] && c_routes=$(grep -c 'location ' /etc/nginx/conf.d/lab.conf || true)
@@ -88,16 +92,18 @@ grep -q '\$lab_backend' /etc/nginx/conf.d/lab.conf 2>/dev/null && trap_variable=
 nginx_ok=no
 systemctl is-active --quiet nginx && nginx_ok=yes || true
 
-echo "$c_containers $c_units $c_active $legacy_state $legacy_enabled $c_cron $c_routes $trap_monthly $trap_external $trap_variable $nginx_ok"
+echo "$c_containers $c_units $c_timer $timer_state $c_active $legacy_state $legacy_enabled $c_cron $c_routes $trap_monthly $trap_external $trap_variable $nginx_ok"
 EOF
 )"
 
-read -r c_containers c_units c_active legacy_state legacy_enabled c_cron c_routes \
+read -r c_containers c_units c_timer timer_state c_active legacy_state legacy_enabled c_cron c_routes \
   trap_monthly trap_external trap_variable nginx_ok <<<"$out"
 
 echo "=== Lab validation vs ground-truth.yaml ==="
 check "containers"        "want=$EXPECTED_CONTAINERS got=$c_containers" eq "$c_containers" "$EXPECTED_CONTAINERS"
 check "systemd units"     "want=$EXPECTED_UNITS got=$c_units"           eq "$c_units" "$EXPECTED_UNITS"
+check "systemd timer"     "want=$EXPECTED_TIMERS got=$c_timer"          eq "$c_timer" "$EXPECTED_TIMERS"
+check "timer active"      "$timer_state"                                is "$timer_state" active
 check "3 units active"    "got=$c_active"                               eq "$c_active" 3
 legacy_ok() { is "$legacy_state" inactive && is "$legacy_enabled" enabled; }
 check "lab-legacy enabled+inactive (ORPHANED)" "$legacy_enabled/$legacy_state" legacy_ok

@@ -53,7 +53,8 @@ fi
 
 # 3. systemd
 systemctl disable --now lab-app.service lab-external-api.service lab-batch.service lab-legacy.service >/dev/null 2>&1 || true
-rm -f /etc/systemd/system/lab-*.service
+systemctl disable --now lab-watchdog.timer >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/lab-*.service /etc/systemd/system/lab-*.timer
 systemctl daemon-reload
 
 # 4. nginx
