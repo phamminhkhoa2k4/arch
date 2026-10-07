@@ -155,6 +155,14 @@ docker compose up -d --remove-orphans >/dev/null
 n=$(docker ps --format '{{.Names}}' | grep -c '^lab-' || true)
 [ "$n" -eq 6 ] || { echo "FAIL: want 6 lab containers, got $n"; exit 1; }
 echo "OK 6 containers"
+
+# US-6.1/6.2: one request per live route fills lab_access.log, one echo
+# guarantees a docker log line. Only /web/ and /pool/ — /var/, /dead/ and
+# /ext/ must stay without access-log evidence in ground-truth.
+curl -fsS -o /dev/null http://127.0.0.1:8080/web/ || echo "WARN /web/ non-2xx"
+curl -fsS -o /dev/null http://127.0.0.1:8080/pool/ || echo "WARN /pool/ non-2xx"
+docker exec lab-web sh -c 'echo lab-smoke' >/dev/null 2>&1 || echo "WARN lab-web log smoke failed"
+echo "OK access-log traffic + log smoke"
 EOF
 
 printf '\nLAB UP — chạy ./lab/validate.sh để đối chiếu ground-truth.\n'

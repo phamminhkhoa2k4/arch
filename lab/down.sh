@@ -59,6 +59,7 @@ systemctl daemon-reload
 
 # 4. nginx
 rm -f /etc/nginx/conf.d/lab.conf
+rm -f /var/log/nginx/lab_access.log*
 nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
 
 # 5. payload

@@ -144,7 +144,7 @@ components:
     kind: nginx_route
     name: "/web/ (port 8080)"
     expected: ACTIVE
-    reason: "proxy_pass http://127.0.0.1:8081/ tĩnh → listener của lab-web, deterministic"
+    reason: "proxy_pass http://127.0.0.1:8081/ tĩnh → listener của lab-web, deterministic; up.sh curl /web/ → evidence nginx_access_log/last_request_at (US-6.1)"
 
   - id: route-var
     kind: nginx_route
@@ -163,7 +163,7 @@ components:
     kind: nginx_route
     name: "/pool/ (port 8080)"
     expected: ACTIVE
-    reason: "proxy_pass http://lab_pool/ → upstream; mỗi member (8081 lab-web, 8082 lab-api) có cạnh proxies_to listener (US-4.2)"
+    reason: "proxy_pass http://lab_pool/ → upstream; mỗi member (8081 lab-web, 8082 lab-api) có cạnh proxies_to listener (US-4.2); up.sh curl /pool/ → evidence nginx_access_log/last_request_at (US-6.1)"
 
   - id: route-ext
     kind: nginx_route

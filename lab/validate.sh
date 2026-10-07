@@ -51,6 +51,7 @@ check() {
   result "$rc" "$label" "$detail"
 }
 eq() { [ "$1" -eq "$2" ]; }
+ge() { [ "$1" -ge "$2" ]; }
 is() { [ "$1" = "$2" ]; }
 
 out="$(ssh "${SSH_OPTS[@]}" "$LAB_SSH" sudo -n bash -s <<'EOF'
@@ -92,12 +93,21 @@ grep -q '\$lab_backend' /etc/nginx/conf.d/lab.conf 2>/dev/null && trap_variable=
 nginx_ok=no
 systemctl is-active --quiet nginx && nginx_ok=yes || true
 
-echo "$c_containers $c_units $c_timer $timer_state $c_active $legacy_state $legacy_enabled $c_cron $c_routes $trap_monthly $trap_external $trap_variable $nginx_ok"
+# US-6.1: one request per live route so lab_access.log has entries even on
+# a freshly restarted lab, then count them.
+curl -fsS -o /dev/null http://127.0.0.1:8080/web/ || true
+curl -fsS -o /dev/null http://127.0.0.1:8080/pool/ || true
+c_access_web=0
+if [ -f /var/log/nginx/lab_access.log ]; then
+  c_access_web=$(grep -c '/web/' /var/log/nginx/lab_access.log || true)
+fi
+
+echo "$c_containers $c_units $c_timer $timer_state $c_active $legacy_state $legacy_enabled $c_cron $c_routes $trap_monthly $trap_external $trap_variable $nginx_ok $c_access_web"
 EOF
 )"
 
 read -r c_containers c_units c_timer timer_state c_active legacy_state legacy_enabled c_cron c_routes \
-  trap_monthly trap_external trap_variable nginx_ok <<<"$out"
+  trap_monthly trap_external trap_variable nginx_ok c_access_web <<<"$out"
 
 echo "=== Lab validation vs ground-truth.yaml ==="
 check "containers"        "want=$EXPECTED_CONTAINERS got=$c_containers" eq "$c_containers" "$EXPECTED_CONTAINERS"
@@ -110,6 +120,7 @@ check "lab-legacy enabled+inactive (ORPHANED)" "$legacy_enabled/$legacy_state" l
 check "cron jobs"         "want=$EXPECTED_CRON got=$c_cron"             eq "$c_cron" "$EXPECTED_CRON"
 check "nginx routes"      "want=$EXPECTED_ROUTES got=$c_routes"         eq "$c_routes" "$EXPECTED_ROUTES"
 check "nginx running"     "$nginx_ok"                                   is "$nginx_ok" yes
+check "access log /web/"  "lines=$c_access_web"                         ge "$c_access_web" 1
 
 echo "--- traps (3) ---"
 check "trap monthly_cron"    "0 0 1 * * present"     is "$trap_monthly" yes
