@@ -89,6 +89,21 @@ type ListenerRow struct {
 	Name        string // display name, e.g. "0.0.0.0:8081"
 }
 
+// UnitRow is one systemd unit recorded in the scan — the input for
+// resolving systemctl references found in cron scripts (cron).
+type UnitRow struct {
+	IdentityKey string
+	Name        string // e.g. "lab-batch.service"
+}
+
+// ContainerRow is one container recorded in the scan — the input for
+// matching bare commands from cron scripts against containers (cron).
+type ContainerRow struct {
+	IdentityKey string
+	Name        string
+	Image       string
+}
+
 // Sink receives collector output. Errors are returned to the caller so the
 // core can decide policy; collectors never write to the database directly.
 type Sink interface {

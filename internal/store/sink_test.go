@@ -471,3 +471,63 @@ func TestListenerRows(t *testing.T) {
 		t.Errorf("row[0] = %+v", rows[0])
 	}
 }
+
+// UnitRows exposes identity keys for systemctl-reference matching.
+func TestUnitRows(t *testing.T) {
+	s := openTemp(t)
+	k := newScan(t, s)
+
+	for _, e := range []collector.Entity{
+		{Kind: "systemd_unit", Name: "lab-batch.service",
+			IdentityKey: "systemd_unit|lab-batch.service", Fingerprint: "f"},
+		{Kind: "systemd_unit", Name: "ssh.service",
+			IdentityKey: "systemd_unit|ssh.service", Fingerprint: "f"},
+		{Kind: "process", Name: "p", IdentityKey: "process|1|1", Fingerprint: "f"},
+	} {
+		if err := k.UpsertEntity(e); err != nil {
+			t.Fatalf("upsert %s: %v", e.IdentityKey, err)
+		}
+	}
+
+	rows, err := k.UnitRows()
+	if err != nil {
+		t.Fatalf("unit rows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d unit rows, want 2", len(rows))
+	}
+	if rows[0].IdentityKey != "systemd_unit|lab-batch.service" || rows[0].Name != "lab-batch.service" {
+		t.Errorf("row[0] = %+v", rows[0])
+	}
+}
+
+// ContainerRows exposes identity, name and image for command matching.
+func TestContainerRows(t *testing.T) {
+	s := openTemp(t)
+	k := newScan(t, s)
+
+	for _, e := range []collector.Entity{
+		{Kind: "container", Name: "lab-cache",
+			IdentityKey: "container|abc123", Fingerprint: "f",
+			Attributes: map[string]string{"image": "redis:7-alpine"}},
+		{Kind: "container", Name: "lab-web",
+			IdentityKey: "container|def456", Fingerprint: "f",
+			Attributes: map[string]string{"image": "nginx:alpine"}},
+		{Kind: "listener", Name: "l", IdentityKey: "listener|tcp|0.0.0.0|80|1", Fingerprint: "f"},
+	} {
+		if err := k.UpsertEntity(e); err != nil {
+			t.Fatalf("upsert %s: %v", e.IdentityKey, err)
+		}
+	}
+
+	rows, err := k.ContainerRows()
+	if err != nil {
+		t.Fatalf("container rows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d container rows, want 2", len(rows))
+	}
+	if rows[0].IdentityKey != "container|abc123" || rows[0].Name != "lab-cache" || rows[0].Image != "redis:7-alpine" {
+		t.Errorf("row[0] = %+v", rows[0])
+	}
+}
