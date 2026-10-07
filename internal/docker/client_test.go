@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // recordingRT records every request that reaches the wire and serves a
@@ -123,6 +125,7 @@ func TestNonWhitelistedEndpointsNeverHitTheWire(t *testing.T) {
 		{"POST", "/volumes/create"},            // write
 		{"GET", "/containers/x/restart"},       // GET but not read-only
 		{"GET", "/containers/x/exec"},          // GET but not read-only
+		{"GET", "/containers/notahexid/logs"},  // logs, but id is not hex
 		{"GET", "/info"},                       // outside inventory
 		{"GET", "/containers/json/../x/start"}, // traversal attempt
 	}
@@ -165,7 +168,9 @@ func TestClientOverUnixSocket(t *testing.T) {
 				"Id": testContainerID, "Created": "2026-10-01T00:00:00Z",
 				"State": map[string]any{"Status": "exited", "StartedAt": "2026-10-01T00:00:01Z"},
 				"HostConfig": map[string]any{"NetworkMode": "bridge",
-					"RestartPolicy": map[string]any{"Name": "no"}},
+					"RestartPolicy": map[string]any{"Name": "no"},
+					"LogConfig":     map[string]any{"Type": "json-file"}},
+				"Config": map[string]any{"Tty": false},
 				"Mounts": []map[string]any{{"Type": "volume", "Name": "v1"}},
 				"NetworkSettings": map[string]any{"Networks": map[string]any{
 					"lab_default": map[string]any{"IPAddress": "172.18.0.2"}}},
@@ -187,7 +192,8 @@ func TestClientOverUnixSocket(t *testing.T) {
 	}
 	ct := got[0]
 	if ct.Name() != "x" || ct.State != "exited" || ct.RestartPol != "no" ||
-		ct.NetworkMode != "bridge" || ct.CreatedAt != "2026-10-01T00:00:00Z" {
+		ct.NetworkMode != "bridge" || ct.CreatedAt != "2026-10-01T00:00:00Z" ||
+		ct.LogDriver != "json-file" || ct.TTY {
 		t.Errorf("merged container = %+v", ct)
 	}
 	if len(ct.Volumes) != 1 || ct.Volumes[0] != "v1" {
@@ -224,5 +230,112 @@ func TestSocketUnreachable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "list containers") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// The logs endpoint joins the whitelist for hex container ids only;
+// POST stays denied and non-hex ids never match.
+func TestLogsEndpointWhitelist(t *testing.T) {
+	if !allowed("GET", "/containers/"+testContainerID+"/logs") {
+		t.Error("GET logs for full id: want allowed")
+	}
+	if !allowed("GET", "/containers/aaaaaaaaaaaaaaaaaaaa/logs") {
+		t.Error("GET logs for short id: want allowed")
+	}
+	if allowed("GET", "/containers/notahexidnotah/logs") {
+		t.Error("GET logs for non-hex id: want denied")
+	}
+	if allowed("POST", "/containers/"+testContainerID+"/logs") {
+		t.Error("POST logs: want denied")
+	}
+	if allowed("GET", "/containers/json/../"+testContainerID+"/logs") {
+		t.Error("GET logs with traversal: want denied")
+	}
+}
+
+func frameLog(stream byte, payload string) []byte {
+	b := make([]byte, 8+len(payload))
+	b[0] = stream
+	binary.BigEndian.PutUint32(b[4:8], uint32(len(payload)))
+	copy(b[8:], payload)
+	return b
+}
+
+// ContainerLogs demultiplexes the framed stream and reports the
+// newest timestamp across stdout and stderr frames.
+func TestContainerLogsFramed(t *testing.T) {
+	body := append(
+		frameLog(1, "2026-10-01T10:00:00.000000000Z earlier line\n"),
+		frameLog(2, "2026-10-02T11:30:00.500000000Z later line\n")...,
+	)
+	rt := &recordingRT{handler: func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       nopCloser{strings.NewReader(string(body))},
+			Request:    req,
+		}, nil
+	}}
+	c := NewClientWithHTTP(&http.Client{Transport: rt})
+
+	ts, ok, err := c.ContainerLogs(testContainerID, false)
+	if err != nil {
+		t.Fatalf("container logs: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	want := time.Date(2026, 10, 2, 11, 30, 0, 500000000, time.UTC)
+	if !ts.Equal(want) {
+		t.Errorf("ts = %v, want %v", ts, want)
+	}
+	wantReq := "GET /containers/" + testContainerID + "/logs?stderr=1&stdout=1&tail=1&timestamps=1"
+	got := rt.lines()
+	if len(got) != 1 || got[0] != wantReq {
+		t.Errorf("wire = %v, want [%q]", got, wantReq)
+	}
+}
+
+// TTY containers return the raw byte stream, no framing.
+func TestContainerLogsTTYRaw(t *testing.T) {
+	body := "2026-10-03T09:00:00.000000000Z tty line\n2026-10-03T09:05:00.000000000Z newest\n"
+	rt := &recordingRT{handler: func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       nopCloser{strings.NewReader(body)},
+			Request:    req,
+		}, nil
+	}}
+	c := NewClientWithHTTP(&http.Client{Transport: rt})
+
+	ts, ok, err := c.ContainerLogs(testContainerID, true)
+	if err != nil {
+		t.Fatalf("container logs: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	want := time.Date(2026, 10, 3, 9, 5, 0, 0, time.UTC)
+	if !ts.Equal(want) {
+		t.Errorf("ts = %v, want %v", ts, want)
+	}
+}
+
+// No log output: ok=false, no error.
+func TestContainerLogsEmpty(t *testing.T) {
+	rt := &recordingRT{handler: func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       nopCloser{strings.NewReader("")},
+			Request:    req,
+		}, nil
+	}}
+	c := NewClientWithHTTP(&http.Client{Transport: rt})
+
+	ts, ok, err := c.ContainerLogs(testContainerID, false)
+	if err != nil {
+		t.Fatalf("container logs: %v", err)
+	}
+	if ok || !ts.IsZero() {
+		t.Errorf("got (%v, %v), want (zero, false)", ts, ok)
 	}
 }

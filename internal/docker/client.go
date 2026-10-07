@@ -6,6 +6,7 @@ package docker
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -29,6 +31,10 @@ type API interface {
 	Images() ([]Image, error)
 	Volumes() ([]Volume, error)
 	Networks() ([]Network, error)
+	// ContainerLogs returns the timestamp of the container's most
+	// recent log line (tty tells the client which stream framing to
+	// expect). ok=false means the container has no log output.
+	ContainerLogs(id string, tty bool) (time.Time, bool, error)
 }
 
 // Client calls the Docker Engine API over a unix socket.
@@ -70,6 +76,9 @@ var whitelist = map[string]bool{
 // inspectRE matches the per-container inspect path (short or full id).
 var inspectRE = regexp.MustCompile(`^/containers/[0-9a-f]{12,64}/json$`)
 
+// logsRE matches the per-container log path (short or full id).
+var logsRE = regexp.MustCompile(`^/containers/[0-9a-f]{12,64}/logs$`)
+
 // allowed reports whether method+path is inside the read-only
 // whitelist. Only GET exists in the table; every other method fails.
 func allowed(method, path string) bool {
@@ -79,7 +88,7 @@ func allowed(method, path string) bool {
 	if whitelist["GET "+path] {
 		return true
 	}
-	return inspectRE.MatchString(path)
+	return inspectRE.MatchString(path) || logsRE.MatchString(path)
 }
 
 // get performs a whitelisted GET and decodes the JSON body into out.
@@ -110,6 +119,32 @@ func (c *Client) get(path string, query url.Values, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// getRaw performs a whitelisted GET and returns the response body,
+// capped at limit bytes (log tails and other small reads).
+func (c *Client) getRaw(path string, query url.Values, limit int64) ([]byte, error) {
+	if !allowed(http.MethodGet, path) {
+		return nil, fmt.Errorf("endpoint not in read-only whitelist: GET %s", path)
+	}
+	u := c.base + path
+	if len(query) > 0 {
+		u += "?" + query.Encode()
+	}
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("GET %s: status %d: %s", path, resp.StatusCode, string(body))
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, limit))
+}
+
 // Containers lists every container (all=true so stopped ones count)
 // and enriches each with inspect facts (restart policy, mounts,
 // networks, timestamps).
@@ -134,6 +169,75 @@ func (c *Client) inspect(id string) (*ContainerInspect, error) {
 		return nil, err
 	}
 	return &ins, nil
+}
+
+// ContainerLogs fetches the tail of a container's log with timestamps
+// (tail=1, timestamps=1) and reports the newest entry. ok=false means
+// no log line with a parseable timestamp was found.
+func (c *Client) ContainerLogs(id string, tty bool) (time.Time, bool, error) {
+	path := "/containers/" + id + "/logs"
+	body, err := c.getRaw(path, url.Values{
+		"stdout": {"1"}, "stderr": {"1"}, "tail": {"1"}, "timestamps": {"1"},
+	}, 1<<20)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("container logs: %w", err)
+	}
+	var latest time.Time
+	for _, line := range logLines(body, tty) {
+		ts, ok := parseLogTimestamp(line)
+		if ok && ts.After(latest) {
+			latest = ts
+		}
+	}
+	if latest.IsZero() {
+		return time.Time{}, false, nil
+	}
+	return latest, true, nil
+}
+
+// logLines splits a /logs response into payload lines. Non-TTY
+// containers use the Docker multiplexed stream framing (8-byte header
+// + payload); TTY containers return the raw byte stream.
+func logLines(body []byte, tty bool) []string {
+	if !tty && framed(body) {
+		var out []string
+		for len(body) >= 8 {
+			n := binary.BigEndian.Uint32(body[4:8])
+			if uint64(n) > uint64(len(body)-8) {
+				break
+			}
+			out = append(out, string(body[8:8+n]))
+			body = body[8+n:]
+		}
+		return out
+	}
+	return strings.Split(string(body), "\n")
+}
+
+// framed reports whether body starts with a Docker stream frame
+// header: stream type 0-2, three zero bytes, big-endian payload size.
+func framed(body []byte) bool {
+	if len(body) < 8 {
+		return false
+	}
+	if body[0] > 2 || body[1] != 0 || body[2] != 0 || body[3] != 0 {
+		return false
+	}
+	return uint64(binary.BigEndian.Uint32(body[4:8])) <= uint64(len(body)-8)
+}
+
+// parseLogTimestamp reads the RFC3339Nano prefix docker prepends to
+// every line when t=1.
+func parseLogTimestamp(line string) (time.Time, bool) {
+	sp := strings.IndexByte(line, ' ')
+	if sp <= 0 {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, line[:sp])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts, true
 }
 
 // Images lists images with size.
@@ -189,6 +293,8 @@ type Container struct {
 	StartedAt   string   `json:"-"`
 	NetworkMode string   `json:"-"`
 	RestartPol  string   `json:"-"`
+	TTY         bool     `json:"-"`
+	LogDriver   string   `json:"-"`
 	Networks    []string `json:"-"`
 	Volumes     []string `json:"-"` // mounted volume names, sorted
 }
@@ -216,7 +322,13 @@ type ContainerInspect struct {
 		RestartPolicy *struct {
 			Name string `json:"Name"`
 		} `json:"RestartPolicy"`
+		LogConfig *struct {
+			Type string `json:"Type"`
+		} `json:"LogConfig"`
 	} `json:"HostConfig"`
+	Config *struct {
+		Tty bool `json:"Tty"`
+	} `json:"Config"`
 	Mounts []struct {
 		Type   string `json:"Type"`
 		Name   string `json:"Name"`
@@ -240,6 +352,12 @@ func (c *Container) applyInspect(ins *ContainerInspect) {
 		if ins.HostConfig.RestartPolicy != nil {
 			c.RestartPol = ins.HostConfig.RestartPolicy.Name
 		}
+		if ins.HostConfig.LogConfig != nil {
+			c.LogDriver = ins.HostConfig.LogConfig.Type
+		}
+	}
+	if ins.Config != nil {
+		c.TTY = ins.Config.Tty
 	}
 	for _, m := range ins.Mounts {
 		if m.Type == "volume" && m.Name != "" {
