@@ -33,20 +33,22 @@ type ProcessIndex interface {
 
 // Collector reads units from the bus and unit files from disk.
 type Collector struct {
-	bus    systemd.Bus
-	loader *systemd.Loader
-	index  ProcessIndex // nil skips manages edges (version-only use)
+	bus     systemd.Bus
+	loader  *systemd.Loader
+	index   ProcessIndex // nil skips manages edges (version-only use)
+	journal systemd.Journal
 }
 
 // New returns the systemd collector. index may be nil only when the
 // collector is used for name/version registration, not Collect.
-func New(bus systemd.Bus, loader *systemd.Loader, index ProcessIndex) *Collector {
-	return &Collector{bus: bus, loader: loader, index: index}
+// journal may be nil: journald activity is then skipped entirely.
+func New(bus systemd.Bus, loader *systemd.Loader, index ProcessIndex, journal systemd.Journal) *Collector {
+	return &Collector{bus: bus, loader: loader, index: index, journal: journal}
 }
 
 func (c *Collector) Name() string { return "systemd" }
 
-func (c *Collector) Version() string { return "1.0.0" }
+func (c *Collector) Version() string { return "1.1.0" }
 
 // depDirectives are the unit-file directives that build depends_on.
 var depDirectives = []string{"Requires", "Wants", "After"}
@@ -72,8 +74,13 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 	}
 
 	// Pass 1: every unit becomes an entity with its state evidence.
+	// Active units also consult the journal for last_log_at (US-6.2);
+	// the first read failure yields one host-wide blind spot and the
+	// remaining units are skipped instead of hammering a broken source.
 	present := map[string]bool{}
 	merged := map[string]*systemd.Merged{}
+	journalBlindErr := ""
+	journalAttempted := 0
 	for _, st := range statuses {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -124,6 +131,28 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 		if st.FragmentPath != "" {
 			attrs["fragment_path"] = st.FragmentPath
 		}
+		var journalTS time.Time
+		var journalCursor string
+		journalOK := false
+		// Dash-prefixed names ("-.mount", the root mount) are valid
+		// units but fail the unit-name guard; skipping them keeps one
+		// odd unit from aborting every journal read on the host.
+		if c.journal != nil && st.ActiveState == "active" && journalBlindErr == "" &&
+			systemd.ValidUnitName(st.Name) {
+			journalAttempted++
+			ts, cursor, ok, jErr := c.journal.LastLine(ctx, st.Name)
+			switch {
+			case jErr != nil:
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				journalBlindErr = jErr.Error()
+			case ok:
+				journalOK = true
+				journalTS, journalCursor = ts, cursor
+				attrs["last_log_at"] = ts.Format(time.RFC3339)
+			}
+		}
 		polarity := collector.PolarityNeutral
 		if st.ActiveState == "active" {
 			polarity = collector.PolarityInUse
@@ -156,6 +185,34 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 			ObservedAt:        nowRFC3339(),
 			RawRef:            rawRef,
 			Value:             value,
+		}); err != nil {
+			return err
+		}
+		if journalOK {
+			if err := emitEvidence("unit-journal:"+st.Name, collector.Evidence{
+				EntityIdentityKey: key,
+				Polarity:          collector.PolarityInUse,
+				Channel:           "journald",
+				Strength:          collector.StrengthDeterministic,
+				ObservedAt:        nowRFC3339(),
+				RawRef:            "journalctl -u " + st.Name + " -n 1",
+				Value: map[string]string{
+					"last_log_at": journalTS.Format(time.RFC3339),
+					"cursor":      journalCursor,
+				},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	if journalBlindErr != "" {
+		if err := sink.AddBlindSpot(collector.BlindSpot{
+			Channel: "journald",
+			Reason:  "journald_unreadable",
+			Detail: map[string]string{
+				"error":           journalBlindErr,
+				"units_attempted": strconv.Itoa(journalAttempted),
+			},
 		}); err != nil {
 			return err
 		}

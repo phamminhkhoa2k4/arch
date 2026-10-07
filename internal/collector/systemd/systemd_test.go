@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"archaeologist/internal/collector"
 	"archaeologist/internal/systemd"
@@ -129,7 +130,7 @@ func labUnits() []systemd.UnitStatus {
 
 func newLabCollector(index ProcessIndex) *Collector {
 	return New(&fakeBus{units: labUnits()},
-		systemd.LoadDir(scriptFS(), "/usr/lib/systemd/system"), index)
+		systemd.LoadDir(scriptFS(), "/usr/lib/systemd/system"), index, nil)
 }
 
 // Units become entities with state evidence: active → in_use, inactive →
@@ -277,7 +278,7 @@ func TestCollectDependsOnEdgeWhenTargetPresent(t *testing.T) {
 		"[Unit]\nRequires=lab-batch.service\n[Service]\nExecStart=/bin/true\n"
 	fs.files["/opt/true"] = "\x7fELF"
 	bus := &fakeBus{units: labUnits()}
-	c := New(bus, systemd.LoadDir(fs, "/usr/lib/systemd/system"), nil)
+	c := New(bus, systemd.LoadDir(fs, "/usr/lib/systemd/system"), nil, nil)
 	sink := newRecSink()
 	if err := c.Collect(context.Background(), sink); err != nil {
 		t.Fatalf("collect: %v", err)
@@ -320,7 +321,7 @@ func TestCollectManagesEdgesFromIndex(t *testing.T) {
 // it into a channel=systemd blind spot without crashing the scan.
 func TestUnreachableBusBecomesBlindSpotNotCrash(t *testing.T) {
 	c := New(&fakeBus{err: errors.New("connect system bus: no such socket")},
-		systemd.LoadDir(scriptFS(), "/usr/lib/systemd/system"), nil)
+		systemd.LoadDir(scriptFS(), "/usr/lib/systemd/system"), nil, nil)
 	sink := newRecSink()
 	err := c.Collect(context.Background(), sink)
 	if err == nil || !strings.Contains(err.Error(), "D-Bus") {
@@ -367,4 +368,175 @@ func hasBlind(s *recSink, entity, reason string) bool {
 		}
 	}
 	return false
+}
+
+// fakeJournal serves fixed last lines or errors and records its calls.
+type fakeJournal struct {
+	lines   map[string]time.Time
+	cursors map[string]string
+	errs    map[string]error
+	calls   []string
+}
+
+func (j *fakeJournal) LastLine(_ context.Context, unit string) (time.Time, string, bool, error) {
+	j.calls = append(j.calls, unit)
+	if err, ok := j.errs[unit]; ok {
+		return time.Time{}, "", false, err
+	}
+	ts, ok := j.lines[unit]
+	if !ok {
+		return time.Time{}, "", false, nil
+	}
+	return ts, j.cursors[unit], true, nil
+}
+
+// US-6.2: active units get last_log_at folded into the same entity
+// upsert plus a journald evidence row; inactive units are not queried.
+func TestCollectJournalEvidence(t *testing.T) {
+	ts := time.Date(2026, 10, 6, 9, 15, 0, 0, time.UTC)
+	j := &fakeJournal{
+		lines:   map[string]time.Time{"lab-app.service": ts},
+		cursors: map[string]string{"lab-app.service": "s=lab;cursor"},
+	}
+	c := New(&fakeBus{units: labUnits()},
+		systemd.LoadDir(scriptFS(), "/usr/lib/systemd/system"), nil, j)
+	sink := newRecSink()
+	if err := c.Collect(context.Background(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	app := sink.entities["systemd_unit|lab-app.service"]
+	if app.Attributes["last_log_at"] != ts.Format(time.RFC3339) {
+		t.Errorf("attr last_log_at = %q", app.Attributes["last_log_at"])
+	}
+	var ev *collector.Evidence
+	for i := range sink.evidence {
+		if sink.evidence[i].Ref == "unit-journal:lab-app.service" {
+			ev = &sink.evidence[i]
+		}
+	}
+	if ev == nil {
+		t.Fatal("journald evidence missing")
+	}
+	if ev.Channel != "journald" || ev.Polarity != collector.PolarityInUse ||
+		ev.Strength != collector.StrengthDeterministic {
+		t.Errorf("evidence = %+v", ev)
+	}
+	if ev.RawRef != "journalctl -u lab-app.service -n 1" {
+		t.Errorf("raw_ref = %q", ev.RawRef)
+	}
+	if ev.Value["last_log_at"] != ts.Format(time.RFC3339) || ev.Value["cursor"] != "s=lab;cursor" {
+		t.Errorf("value = %+v", ev.Value)
+	}
+	for _, unit := range j.calls {
+		u := sink.entities["systemd_unit|"+unit]
+		if u.Attributes["active_state"] != "active" {
+			t.Errorf("journal queried for non-active unit %s", unit)
+		}
+	}
+	if b := blindsOnChannel(sink.blinds, "journald"); len(b) != 0 {
+		t.Errorf("unexpected journald blinds: %+v", b)
+	}
+}
+
+// Empty journals are observable facts: no evidence, no blind.
+func TestCollectJournalEmptyNoBlind(t *testing.T) {
+	j := &fakeJournal{lines: map[string]time.Time{}}
+	c := New(&fakeBus{units: labUnits()},
+		systemd.LoadDir(scriptFS(), "/usr/lib/systemd/system"), nil, j)
+	sink := newRecSink()
+	if err := c.Collect(context.Background(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	for _, e := range sink.evidence {
+		if e.Channel == "journald" {
+			t.Errorf("unexpected journald evidence: %+v", e)
+		}
+	}
+	if len(j.calls) == 0 {
+		t.Error("journal should be consulted for active units")
+	}
+	if b := blindsOnChannel(sink.blinds, "journald"); len(b) != 0 {
+		t.Errorf("unexpected journald blinds: %+v", b)
+	}
+}
+
+// The first journal failure yields one host-wide blind spot and the
+// remaining units are skipped; Collect itself keeps succeeding.
+func TestCollectJournalErrorOneBlind(t *testing.T) {
+	j := &fakeJournal{errs: map[string]error{}}
+	for _, u := range labUnits() {
+		if u.ActiveState == "active" {
+			j.errs[u.Name] = errors.New("journal inaccessible")
+		}
+	}
+	c := New(&fakeBus{units: labUnits()},
+		systemd.LoadDir(scriptFS(), "/usr/lib/systemd/system"), nil, j)
+	sink := newRecSink()
+	if err := c.Collect(context.Background(), sink); err != nil {
+		t.Fatalf("collect must survive journal failure: %v", err)
+	}
+	jb := blindsOnChannel(sink.blinds, "journald")
+	if len(jb) != 1 {
+		t.Fatalf("journald blinds = %+v, want exactly 1", jb)
+	}
+	b := jb[0]
+	if b.Channel != "journald" || b.Reason != "journald_unreadable" ||
+		b.EntityIdentityKey != "" || b.Detail["error"] == "" || b.Detail["units_attempted"] != "1" {
+		t.Errorf("blind = %+v", b)
+	}
+	if len(j.calls) != 1 {
+		t.Errorf("journal calls = %d, want 1 (stop after first failure)", len(j.calls))
+	}
+}
+
+// A dash-prefixed unit name ("-.mount", the root mount present on
+// every systemd host) must be skipped without aborting the journal
+// reads of the other active units — seen as total journald coverage
+// loss on the lab VPS before the guard was added.
+func TestCollectJournalSkipsInvalidUnitName(t *testing.T) {
+	ts := time.Date(2026, 10, 6, 9, 15, 0, 0, time.UTC)
+	j := &fakeJournal{
+		lines:   map[string]time.Time{"lab-app.service": ts},
+		cursors: map[string]string{"lab-app.service": "s=lab;cursor"},
+	}
+	units := labUnits()
+	units = append(units, systemd.UnitStatus{
+		Name: "-.mount", LoadState: "loaded", ActiveState: "active",
+		SubState: "mounted", Loaded: true,
+	})
+	c := New(&fakeBus{units: units},
+		systemd.LoadDir(scriptFS(), "/usr/lib/systemd/system"), nil, j)
+	sink := newRecSink()
+	if err := c.Collect(context.Background(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	for _, call := range j.calls {
+		if call == "-.mount" {
+			t.Error("journal queried for dash-prefixed unit")
+		}
+	}
+	if b := blindsOnChannel(sink.blinds, "journald"); len(b) != 0 {
+		t.Errorf("journald blinds = %+v, want none", b)
+	}
+	app := sink.entities["systemd_unit|lab-app.service"]
+	if app.Attributes["last_log_at"] != ts.Format(time.RFC3339) {
+		t.Errorf("last_log_at for lab-app = %q, want evidence of other units kept",
+			app.Attributes["last_log_at"])
+	}
+	mount := sink.entities["systemd_unit|-.mount"]
+	if _, ok := mount.Attributes["last_log_at"]; ok {
+		t.Error("dash-prefixed unit must not get last_log_at")
+	}
+}
+
+// blindsOnChannel filters recorded blind spots by channel.
+func blindsOnChannel(blinds []collector.BlindSpot, channel string) []collector.BlindSpot {
+	var out []collector.BlindSpot
+	for _, b := range blinds {
+		if b.Channel == channel {
+			out = append(out, b)
+		}
+	}
+	return out
 }
