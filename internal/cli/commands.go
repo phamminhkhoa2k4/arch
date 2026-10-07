@@ -29,12 +29,7 @@ func addCommands(root *cobra.Command) {
 			Args:  cobra.ExactArgs(1),
 			Run:   stub(),
 		},
-		&cobra.Command{
-			Use:   "explain <component>",
-			Short: "Show dependencies, evidence, and blind spots for a component",
-			Args:  cobra.ExactArgs(1),
-			Run:   stub(),
-		},
+		newExplainCmd(),
 		&cobra.Command{
 			Use:   "plan <component>",
 			Short: "Generate a staged cleanup plan with rollback commands",

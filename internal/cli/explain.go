@@ -1,0 +1,153 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"archaeologist/internal/store"
+)
+
+// newExplainCmd shows one component's evidence and blind spots from
+// the latest scan (US-6.4). The graph itself lands with the
+// correlation epic; this command stays evidence-first.
+func newExplainCmd() *cobra.Command {
+	var dbPath string
+	cmd := &cobra.Command{
+		Use:   "explain <component>",
+		Short: "Show dependencies, evidence, and blind spots for a component",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExplain(cmd.Context(), cmd.OutOrStdout(), dbPath, args[0])
+		},
+	}
+	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
+		"path to the SQLite evidence database")
+	return cmd
+}
+
+func runExplain(ctx context.Context, w io.Writer, dbPath, ref string) error {
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	scanID, err := st.LatestScanID(ctx)
+	if err != nil {
+		return err
+	}
+	entities, err := st.FindEntities(ctx, scanID, ref)
+	if err != nil {
+		return err
+	}
+	switch len(entities) {
+	case 0:
+		return fmt.Errorf("không tìm thấy component nào khớp %q trong scan #%d", ref, scanID)
+	case 1:
+	default:
+		var b strings.Builder
+		fmt.Fprintf(&b, "tham chiếu %q khớp %d entity — dùng identity_key:", ref, len(entities))
+		for _, e := range entities {
+			fmt.Fprintf(&b, "\n  %s", e.IdentityKey)
+		}
+		return errors.New(b.String())
+	}
+
+	ent := entities[0]
+	evid, err := st.EvidenceFor(ctx, ent.ID)
+	if err != nil {
+		return err
+	}
+	blinds, err := st.BlindSpotsFor(ctx, ent.ID)
+	if err != nil {
+		return err
+	}
+	return printExplain(w, scanID, ent, evid, blinds)
+}
+
+func printExplain(
+	w io.Writer,
+	scanID int64,
+	ent store.EntityRow,
+	evid []store.EvidenceRow,
+	blinds []store.BlindRow,
+) error {
+	if _, err := fmt.Fprintf(w, "Component: %s — %s (scan #%d)\n", ent.Kind, ent.Name, scanID); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Identity:  %s\n", ent.IdentityKey); err != nil {
+		return err
+	}
+	if len(ent.Attributes) > 0 {
+		if _, err := fmt.Fprintln(w, "Attributes:"); err != nil {
+			return err
+		}
+		for _, k := range sortedKeys(ent.Attributes) {
+			if _, err := fmt.Fprintf(w, "  %s = %s\n", k, ent.Attributes[k]); err != nil {
+				return err
+			}
+		}
+	}
+
+	if _, err := fmt.Fprintf(w, "Evidence (%d):\n", len(evid)); err != nil {
+		return err
+	}
+	if len(evid) == 0 {
+		if _, err := fmt.Fprintln(w, "  (không có evidence)"); err != nil {
+			return err
+		}
+	}
+	for _, e := range evid {
+		if _, err := fmt.Fprintf(w, "  [%s] %s %s %s\n",
+			e.Polarity, e.Channel, e.Strength, e.ObservedAt); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "    value: %s\n", joinKV(e.Value)); err != nil {
+			return err
+		}
+		// One copyable line per source so a reader can jump straight
+		// to the file, API call or command behind the fact.
+		if _, err := fmt.Fprintf(w, "    nguồn: %s\n", e.RawRef); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintf(w, "Blind spots (%d):\n", len(blinds)); err != nil {
+		return err
+	}
+	if len(blinds) == 0 {
+		if _, err := fmt.Fprintln(w, "  (không có blind spot)"); err != nil {
+			return err
+		}
+	}
+	for _, b := range blinds {
+		if _, err := fmt.Fprintf(w, "  [%s] %s: %s\n", b.Channel, b.Reason, joinKV(b.Detail)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// joinKV renders a string map as deterministic "k=v k=v" pairs.
+func joinKV(m map[string]string) string {
+	parts := make([]string, 0, len(m))
+	for _, k := range sortedKeys(m) {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, m[k]))
+	}
+	return strings.Join(parts, " ")
+}
