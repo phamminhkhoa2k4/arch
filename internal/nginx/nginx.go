@@ -121,11 +121,23 @@ type FileError struct {
 
 func (e FileError) Error() string { return fmt.Sprintf("%s:%d: %v", e.File, e.Line, e.Err) }
 
+// AccessLog is one access_log directive. Path is the log file nginx
+// writes; Format is the named format when one is given ("" means the
+// nginx built-in default, combined). Directives with the argument
+// "off" are skipped: they disable logging instead of naming a file.
+type AccessLog struct {
+	File   string
+	Line   int
+	Path   string
+	Format string
+}
+
 // Config is the extracted static graph of one nginx installation.
 type Config struct {
-	Routes    []Route
-	Upstreams []Upstream
-	Errors    []FileError // syntax errors, never fatal to the caller
+	Routes     []Route
+	Upstreams  []Upstream
+	AccessLogs []AccessLog
+	Errors     []FileError // syntax errors, never fatal to the caller
 }
 
 // Loader reads nginx configuration trees from disk.
@@ -283,6 +295,13 @@ func (l *Loader) walkBlock(
 
 		case d.Directive == "server_name" && c.srv != nil && len(d.Args) > 0:
 			c.srv.names = append(c.srv.names, d.Args...)
+
+		case d.Directive == "access_log" && len(d.Args) > 0 && d.Args[0] != "off":
+			al := AccessLog{File: c.file, Line: d.Line, Path: d.Args[0]}
+			if len(d.Args) > 1 {
+				al.Format = d.Args[1]
+			}
+			cfg.AccessLogs = append(cfg.AccessLogs, al)
 
 		case (d.Directive == "proxy_pass" || d.Directive == "fastcgi_pass") &&
 			c.loc != nil && len(d.Args) > 0:

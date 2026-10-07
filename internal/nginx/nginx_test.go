@@ -374,3 +374,44 @@ func TestParseTarget(t *testing.T) {
 		}
 	}
 }
+
+// Load records every access_log directive with file, line, path and
+// named format; the argument "off" is skipped.
+func TestLoadRecordsAccessLogs(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"nginx.conf": `
+events { worker_connections 1024; }
+http {
+    access_log /var/log/nginx/access.log main;
+    include conf.d/*.conf;
+}
+`,
+		"conf.d/lab.conf": `
+access_log off;
+server {
+    listen 8080;
+    access_log /var/log/nginx/lab_access.log;
+    location /web/ { proxy_pass http://127.0.0.1:8081/; }
+}
+`,
+	})
+	cfg, err := NewLoader().Load(root)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(cfg.AccessLogs) != 2 {
+		t.Fatalf("got %d access logs, want 2: %+v", len(cfg.AccessLogs), cfg.AccessLogs)
+	}
+	byPath := map[string]AccessLog{}
+	for _, al := range cfg.AccessLogs {
+		byPath[al.Path] = al
+	}
+	main, ok := byPath["/var/log/nginx/access.log"]
+	if !ok || main.Format != "main" || main.Line == 0 || main.File == "" {
+		t.Errorf("main access log = %+v", main)
+	}
+	lab, ok := byPath["/var/log/nginx/lab_access.log"]
+	if !ok || lab.Format != "" {
+		t.Errorf("lab access log = %+v", lab)
+	}
+}
