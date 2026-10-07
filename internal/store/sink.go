@@ -335,6 +335,34 @@ func (k *ScanSink) UnitRows() ([]collector.UnitRow, error) {
 	return out, nil
 }
 
+// PathRows returns every file-backed entity of this scan with its
+// identity key and path — the input for filesystem mtime collection.
+// Entities whose attributes carry no path are omitted.
+func (k *ScanSink) PathRows() ([]collector.PathRow, error) {
+	rows, err := k.s.db.QueryContext(k.ctx,
+		`SELECT identity_key, json_extract(attributes_json, '$.path') FROM entities
+		 WHERE scan_id = ? AND kind IN ('script', 'binary')
+		   AND json_extract(attributes_json, '$.path') IS NOT NULL
+		 ORDER BY identity_key`, k.scanID)
+	if err != nil {
+		return nil, fmt.Errorf("path rows: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []collector.PathRow
+	for rows.Next() {
+		var key, path string
+		if err := rows.Scan(&key, &path); err != nil {
+			return nil, fmt.Errorf("path rows scan: %w", err)
+		}
+		out = append(out, collector.PathRow{IdentityKey: key, Path: path})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("path rows: %w", err)
+	}
+	return out, nil
+}
+
 // ContainerRows returns every container of this scan with identity,
 // name and image — the input for command-to-container matching (cron).
 func (k *ScanSink) ContainerRows() ([]collector.ContainerRow, error) {

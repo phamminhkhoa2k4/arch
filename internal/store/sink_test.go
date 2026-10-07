@@ -531,3 +531,41 @@ func TestContainerRows(t *testing.T) {
 		t.Errorf("row[0] = %+v", rows[0])
 	}
 }
+
+// PathRows exposes identity and path for file-backed entities only.
+func TestPathRows(t *testing.T) {
+	s := openTemp(t)
+	k := newScan(t, s)
+
+	for _, e := range []collector.Entity{
+		{Kind: "script", Name: "/opt/lab/scripts/backup.sh",
+			IdentityKey: "script|/opt/lab/scripts/backup.sh", Fingerprint: "f",
+			Attributes: map[string]string{"path": "/opt/lab/scripts/backup.sh"}},
+		{Kind: "binary", Name: "/usr/bin/thing",
+			IdentityKey: "binary|/usr/bin/thing", Fingerprint: "f",
+			Attributes: map[string]string{"path": "/usr/bin/thing"}},
+		{Kind: "script", Name: "no-path",
+			IdentityKey: "script|no-path", Fingerprint: "f",
+			Attributes: map[string]string{"unit": "x.service"}},
+		{Kind: "process", Name: "p", IdentityKey: "process|1|1", Fingerprint: "f",
+			Attributes: map[string]string{"path": "/ignored"}},
+	} {
+		if err := k.UpsertEntity(e); err != nil {
+			t.Fatalf("upsert %s: %v", e.IdentityKey, err)
+		}
+	}
+
+	rows, err := k.PathRows()
+	if err != nil {
+		t.Fatalf("path rows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d path rows, want 2", len(rows))
+	}
+	if rows[0].IdentityKey != "binary|/usr/bin/thing" || rows[0].Path != "/usr/bin/thing" {
+		t.Errorf("row[0] = %+v", rows[0])
+	}
+	if rows[1].IdentityKey != "script|/opt/lab/scripts/backup.sh" || rows[1].Path != "/opt/lab/scripts/backup.sh" {
+		t.Errorf("row[1] = %+v", rows[1])
+	}
+}

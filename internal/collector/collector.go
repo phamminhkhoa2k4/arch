@@ -104,6 +104,13 @@ type ContainerRow struct {
 	Image       string
 }
 
+// PathRow is one file-backed entity recorded in the scan — the input
+// for filesystem mtime collection.
+type PathRow struct {
+	IdentityKey string
+	Path        string
+}
+
 // Sink receives collector output. Errors are returned to the caller so the
 // core can decide policy; collectors never write to the database directly.
 type Sink interface {
