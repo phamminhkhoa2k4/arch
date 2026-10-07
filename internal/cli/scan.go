@@ -13,10 +13,12 @@ import (
 	"archaeologist/internal/collector"
 	dcoll "archaeologist/internal/collector/docker"
 	"archaeologist/internal/collector/listener"
+	ncoll "archaeologist/internal/collector/nginx"
 	"archaeologist/internal/collector/process"
 	sysd "archaeologist/internal/collector/systemd"
 	"archaeologist/internal/compose"
 	dengine "archaeologist/internal/docker"
+	"archaeologist/internal/nginx"
 	"archaeologist/internal/procfs"
 	"archaeologist/internal/store"
 	"archaeologist/internal/systemd"
@@ -61,26 +63,31 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion string) error
 	// entities and the systemd collector reads the process snapshot, so
 	// both run after the process collector. The docker collector matches
 	// published ports against listeners and cgroup container ids, so it
-	// runs last. The systemd and docker collectors need the sink as
-	// their index, but the sink only exists after the scan row is
-	// created — build the list twice (Versions needs only
+	// runs before nginx, which matches proxy targets against the same
+	// listener snapshot. The systemd, docker and nginx collectors need
+	// the sink as their index, but the sink only exists after the scan
+	// row is created — build the list twice (Versions needs only
 	// names/versions).
 	type scanIndex interface {
 		sysd.ProcessIndex
 		dcoll.Index
+		ncoll.Index
 	}
 	newCollectors := func(index scanIndex) []collector.Collector {
 		var sIdx sysd.ProcessIndex
 		var dIdx dcoll.Index
+		var nIdx ncoll.Index
 		if index != nil {
 			sIdx = index
 			dIdx = index
+			nIdx = index
 		}
 		return []collector.Collector{
 			process.New(fs),
 			listener.New(fs),
 			sysd.New(bus, loader, sIdx),
 			dcoll.New(dengine.NewClient(dengine.DefaultSocket), compose.NewLoader(), dIdx),
+			ncoll.New(nginx.NewLoader(), nIdx),
 		}
 	}
 	cs := newCollectors(nil)
