@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"archaeologist/internal/collector"
+	ccoll "archaeologist/internal/collector/cron"
 	dcoll "archaeologist/internal/collector/docker"
 	"archaeologist/internal/collector/listener"
 	ncoll "archaeologist/internal/collector/nginx"
@@ -64,23 +65,28 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion string) error
 	// both run after the process collector. The docker collector matches
 	// published ports against listeners and cgroup container ids, so it
 	// runs before nginx, which matches proxy targets against the same
-	// listener snapshot. The systemd, docker and nginx collectors need
-	// the sink as their index, but the sink only exists after the scan
-	// row is created — build the list twice (Versions needs only
-	// names/versions).
+	// listener snapshot. The cron collector runs last: it traces
+	// crontab references against the unit and container snapshots the
+	// earlier collectors recorded. The systemd, docker, nginx and cron
+	// collectors need the sink as their index, but the sink only exists
+	// after the scan row is created — build the list twice (Versions
+	// needs only names/versions).
 	type scanIndex interface {
 		sysd.ProcessIndex
 		dcoll.Index
 		ncoll.Index
+		ccoll.Index
 	}
 	newCollectors := func(index scanIndex) []collector.Collector {
 		var sIdx sysd.ProcessIndex
 		var dIdx dcoll.Index
 		var nIdx ncoll.Index
+		var cIdx ccoll.Index
 		if index != nil {
 			sIdx = index
 			dIdx = index
 			nIdx = index
+			cIdx = index
 		}
 		return []collector.Collector{
 			process.New(fs),
@@ -88,6 +94,7 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion string) error
 			sysd.New(bus, loader, sIdx),
 			dcoll.New(dengine.NewClient(dengine.DefaultSocket), compose.NewLoader(), dIdx),
 			ncoll.New(nginx.NewLoader(), nIdx),
+			ccoll.New(systemd.OSFS{}, cIdx),
 		}
 	}
 	cs := newCollectors(nil)
