@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"archaeologist/internal/collector"
 	"archaeologist/internal/docker"
@@ -60,12 +61,24 @@ type fakeAPI struct {
 	volumes    []docker.Volume
 	networks   []docker.Network
 	err        error
+	logs       map[string]time.Time // container id → newest log line
+	logErrs    map[string]error
+	logCalls   int
 }
 
 func (f *fakeAPI) Containers() ([]docker.Container, error) { return f.containers, f.err }
 func (f *fakeAPI) Images() ([]docker.Image, error)         { return f.images, f.err }
 func (f *fakeAPI) Volumes() ([]docker.Volume, error)       { return f.volumes, f.err }
 func (f *fakeAPI) Networks() ([]docker.Network, error)     { return f.networks, f.err }
+
+func (f *fakeAPI) ContainerLogs(id string, _ bool) (time.Time, bool, error) {
+	f.logCalls++
+	if err, ok := f.logErrs[id]; ok {
+		return time.Time{}, false, err
+	}
+	ts, ok := f.logs[id]
+	return ts, ok, nil
+}
 
 // fakeIndex serves fixed snapshots.
 type fakeIndex struct {
@@ -527,5 +540,106 @@ func TestCollectTcp6ListenerMatchesPublishedPort(t *testing.T) {
 	edges := edgeSet(sink.edges)
 	if _, ok := edges["listens_on listener|tcp6|::|8081|5555->container|"+idA]; !ok {
 		t.Errorf("tcp6 listener must match tcp published port: %+v", sink.edges)
+	}
+}
+
+// US-6.3: docker_created evidence carries the inspect Created
+// timestamp as last_deploy_at, neutral polarity, traceable raw_ref.
+func TestCollectCreatedEvidence(t *testing.T) {
+	api := baseInventory()
+	sink := newRecSink()
+	c := New(api, nil, nil)
+	if err := c.Collect(t.Context(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	e, ok := evidenceByRef(sink.evidence)["container-created:"+idA]
+	if !ok {
+		t.Fatal("created evidence missing")
+	}
+	if e.Channel != "docker_created" || e.Polarity != collector.PolarityNeutral ||
+		e.Strength != collector.StrengthDeterministic {
+		t.Errorf("created evidence = %+v", e)
+	}
+	if e.Value["last_deploy_at"] != "2026-10-05T10:00:00Z" {
+		t.Errorf("last_deploy_at = %q", e.Value["last_deploy_at"])
+	}
+	if !strings.Contains(e.RawRef, idA) {
+		t.Errorf("raw_ref = %q, want container id", e.RawRef)
+	}
+	if e.ObservedAt == "" {
+		t.Error("observed_at must be set")
+	}
+}
+
+// US-6.2: readable driver with a log line → docker_log evidence and a
+// last_log_at attribute folded into the same entity upsert.
+func TestCollectLogEvidence(t *testing.T) {
+	api := baseInventory()
+	ts := time.Date(2026, 10, 6, 8, 30, 0, 0, time.UTC)
+	api.logs = map[string]time.Time{idA: ts}
+	sink := newRecSink()
+	c := New(api, nil, nil)
+	if err := c.Collect(t.Context(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	e, ok := evidenceByRef(sink.evidence)["container-log:"+idA]
+	if !ok {
+		t.Fatal("log evidence missing")
+	}
+	if e.Channel != "docker_log" || e.Polarity != collector.PolarityInUse {
+		t.Errorf("log evidence = %+v", e)
+	}
+	if e.Value["last_log_at"] != ts.Format(time.RFC3339) {
+		t.Errorf("value = %+v", e.Value)
+	}
+	if got := sink.entities["container|"+idA].Attributes["last_log_at"]; got != ts.Format(time.RFC3339) {
+		t.Errorf("attr last_log_at = %q", got)
+	}
+	if _, ok := evidenceByRef(sink.evidence)["container-log:"+idB]; ok {
+		t.Error("container B has no log line; no evidence expected")
+	}
+	if len(sink.blinds) != 0 {
+		t.Errorf("unexpected blinds: %+v", sink.blinds)
+	}
+}
+
+// US-6.2 AC3: a driver that cannot be read becomes a blind spot and
+// that container never reaches the log API.
+func TestCollectUnsupportedLogDriverBlind(t *testing.T) {
+	api := baseInventory()
+	api.containers[0].LogDriver = "syslog"
+	sink := newRecSink()
+	c := New(api, nil, nil)
+	if err := c.Collect(t.Context(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if api.logCalls != 1 {
+		t.Errorf("log API called %d times, want 1 (only the readable container)", api.logCalls)
+	}
+	if len(sink.blinds) != 1 {
+		t.Fatalf("blinds = %+v, want 1", sink.blinds)
+	}
+	b := sink.blinds[0]
+	if b.Reason != "log_driver_unsupported" || b.Channel != "docker" ||
+		b.EntityIdentityKey != "container|"+idA || b.Detail["driver"] != "syslog" {
+		t.Errorf("blind = %+v", b)
+	}
+	if _, ok := evidenceByRef(sink.evidence)["container-log:"+idA]; ok {
+		t.Error("docker_log evidence for unsupported driver")
+	}
+}
+
+// A log read failure is reported per container instead of failing the scan.
+func TestCollectLogReadErrorBlind(t *testing.T) {
+	api := baseInventory()
+	api.logErrs = map[string]error{idA: errors.New("driver refused")}
+	sink := newRecSink()
+	c := New(api, nil, nil)
+	if err := c.Collect(t.Context(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(sink.blinds) != 1 || sink.blinds[0].Reason != "docker_log_unreadable" ||
+		sink.blinds[0].EntityIdentityKey != "container|"+idA {
+		t.Errorf("blinds = %+v", sink.blinds)
 	}
 }

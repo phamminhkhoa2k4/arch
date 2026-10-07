@@ -46,7 +46,7 @@ func New(api docker.API, loader *compose.Loader, index Index) *Collector {
 func (c *Collector) Name() string { return "docker" }
 
 // Version implements collector.Collector.
-func (c *Collector) Version() string { return "1.0.0" }
+func (c *Collector) Version() string { return "1.1.0" }
 
 // Collect reads the whitelisted endpoints once and writes entities,
 // findings and edges. Any API failure is returned so the run loop can
@@ -112,12 +112,17 @@ func (c *Collector) collectContainers(
 		if ct.State == "running" {
 			polarity = collector.PolarityInUse
 		}
+		attrs := containerAttrs(*ct)
+		lastLog, logOK, logBlind, logErr := c.containerLogTime(key, ct)
+		if logOK {
+			attrs["last_log_at"] = lastLog.UTC().Format(time.RFC3339)
+		}
 		if err := sink.UpsertEntity(collector.Entity{
 			Kind:        "container",
 			Name:        ct.Name(),
 			IdentityKey: key,
 			Fingerprint: containerFingerprint(*ct),
-			Attributes:  containerAttrs(*ct),
+			Attributes:  attrs,
 		}); err != nil {
 			return err
 		}
@@ -137,8 +142,82 @@ func (c *Collector) collectContainers(
 		}); err != nil {
 			return err
 		}
+		if ct.CreatedAt != "" {
+			if err := emit(collector.Evidence{
+				EntityIdentityKey: key,
+				Polarity:          collector.PolarityNeutral,
+				Channel:           "docker_created",
+				Strength:          collector.StrengthDeterministic,
+				ObservedAt:        nowRFC3339(),
+				RawRef:            "docker:/containers/" + ct.ID + "/json",
+				Ref:               "container-created:" + ct.ID,
+				Value: map[string]string{
+					"last_deploy_at": ct.CreatedAt,
+					"created_at":     ct.CreatedAt,
+					"started_at":     ct.StartedAt,
+				},
+			}); err != nil {
+				return err
+			}
+		}
+		if logOK {
+			if err := emit(collector.Evidence{
+				EntityIdentityKey: key,
+				Polarity:          collector.PolarityInUse,
+				Channel:           "docker_log",
+				Strength:          collector.StrengthDeterministic,
+				ObservedAt:        nowRFC3339(),
+				RawRef:            "docker:/containers/" + ct.ID + "/logs?tail=1",
+				Ref:               "container-log:" + ct.ID,
+				Value: map[string]string{
+					"last_log_at": lastLog.UTC().Format(time.RFC3339),
+				},
+			}); err != nil {
+				return err
+			}
+		}
+		if logBlind != nil {
+			if err := sink.AddBlindSpot(*logBlind); err != nil {
+				return err
+			}
+		}
+		if logErr != nil {
+			if err := sink.AddBlindSpot(collector.BlindSpot{
+				EntityIdentityKey: key,
+				Channel:           "docker",
+				Reason:            "docker_log_unreadable",
+				Detail:            map[string]string{"error": logErr.Error()},
+			}); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+// containerLogTime reads the newest log timestamp of one container.
+// A nil blind means the driver is readable (or unknown, so reading is
+// attempted); a non-nil blind reports an unsupported logging driver
+// without touching the API. An error means the read itself failed.
+func (c *Collector) containerLogTime(
+	key string,
+	ct *docker.Container,
+) (time.Time, bool, *collector.BlindSpot, error) {
+	switch ct.LogDriver {
+	case "", "json-file", "journald":
+	default:
+		return time.Time{}, false, &collector.BlindSpot{
+			EntityIdentityKey: key,
+			Channel:           "docker",
+			Reason:            "log_driver_unsupported",
+			Detail:            map[string]string{"driver": ct.LogDriver},
+		}, nil
+	}
+	ts, ok, err := c.api.ContainerLogs(ct.ID, ct.TTY)
+	if err != nil {
+		return time.Time{}, false, nil, err
+	}
+	return ts, ok, nil, nil
 }
 
 // portLines renders published ports canonically; the engine can list
