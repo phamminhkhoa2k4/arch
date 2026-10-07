@@ -16,7 +16,8 @@ counts:
   containers: 6
   systemd_units: 4
   cron_jobs: 6
-  nginx_routes: 2
+  nginx_routes: 5
+  nginx_upstreams: 1
 
 traps:
   - monthly_cron
@@ -130,7 +131,7 @@ components:
     expected: ACTIVE
     reason: "macro @reboot — test parser macro (US-5.1)"
 
-  # ---------- nginx routes (2) ----------
+  # ---------- nginx routes (5) + upstream (1) ----------
   - id: route-web
     kind: nginx_route
     name: "/web/ (port 8080)"
@@ -143,3 +144,27 @@ components:
     expected: UNKNOWN
     reason: "proxy_pass http://$lab_backend/ dùng biến — collector bắt buộc ghi blind_spot, không được đoán đích; thực tế biến set thành 127.0.0.1:8082 (lab-api) nhưng static analysis không được tự tin hơn thế"
     trap: nginx_variable
+
+  - id: route-dead
+    kind: nginx_route
+    name: "/dead/ (port 8080)"
+    expected: BROKEN
+    reason: "proxy_pass http://127.0.0.1:9999/ cố tình trỏ port không ai nghe — ground-truth case BROKEN_ROUTE, scan phải finding đúng mỗi route này (US-4.3)"
+
+  - id: route-pool
+    kind: nginx_route
+    name: "/pool/ (port 8080)"
+    expected: ACTIVE
+    reason: "proxy_pass http://lab_pool/ → upstream; mỗi member (8081 lab-web, 8082 lab-api) có cạnh proxies_to listener (US-4.2)"
+
+  - id: route-ext
+    kind: nginx_route
+    name: "/ext/ (port 8080)"
+    expected: EXTERNAL
+    reason: "proxy_pass https://example.com/ ngoài host — attrs upstream_scope=external, không cạnh, không blind spot (US-4.2)"
+
+  - id: upstream-pool
+    kind: nginx_upstream
+    name: "lab_pool"
+    expected: ACTIVE
+    reason: "upstream 2 member cùng có cạnh proxies_to listener, không chỉ server đầu (US-4.2)"

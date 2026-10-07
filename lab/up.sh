@@ -130,7 +130,7 @@ fi
 echo "OK 6 cron entries"
 EOF
 
-step "6/7 nginx routes (2)"
+step "6/7 nginx routes (5)"
 run <<'EOF'
 set -euo pipefail
 install -m 644 /opt/lab/nginx/lab.conf /etc/nginx/conf.d/lab.conf
@@ -138,8 +138,8 @@ nginx -t >/dev/null || { echo "FAIL: nginx config invalid"; exit 1; }
 systemctl enable --now nginx >/dev/null 2>&1
 systemctl reload nginx
 n=$(grep -c 'location ' /etc/nginx/conf.d/lab.conf)
-[ "$n" -eq 2 ] || { echo "FAIL: want 2 locations, got $n"; exit 1; }
-echo "OK 2 routes"
+[ "$n" -eq 5 ] || { echo "FAIL: want 5 locations, got $n"; exit 1; }
+echo "OK 5 routes"
 EOF
 
 step "7/7 docker compose up (6 containers)"

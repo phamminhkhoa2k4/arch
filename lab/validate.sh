@@ -36,7 +36,7 @@ SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10)
 EXPECTED_CONTAINERS=6
 EXPECTED_UNITS=4
 EXPECTED_CRON=6
-EXPECTED_ROUTES=2
+EXPECTED_ROUTES=5
 
 FAIL=0
 result() { # result <ok?> <label> <detail>
