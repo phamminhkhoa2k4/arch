@@ -1,0 +1,40 @@
+# Lab rules for delete-check validation (fresh VPS observation window).
+#
+# The ground-truth VPS is freshly provisioned: there is no 14-day
+# observation history, so observation_window_days is 0 — otherwise
+# every verdict would collapse to UNKNOWN for lack of window and the
+# D3 ground-truth matrix could not be measured. Everything else
+# mirrors the embedded defaults (ratios, blocker/coverage matrix,
+# fallback UNKNOWN).
+#
+# Usage: archaeologist delete-check <component> --rules-file lab/rules.lab.yaml
+thresholds:
+  observation_window_days: 0
+  no_deploy_days: 90
+  no_activity_days: 30
+verdicts:
+  likely_orphaned_requires:
+    coverage: [HIGH, MEDIUM]
+    blockers: none
+  orphaned_requires:
+    coverage: [HIGH]
+    blockers: none
+    window_sufficient: true
+  fallback: UNKNOWN
+coverage:
+  high_ratio: 0.90
+  medium_ratio: 0.60
+  channels:
+    listener: [procfs_net, listener_mapping]
+    process: [procfs]
+    systemd_unit: [systemd, journald, listener_mapping]
+    container: [docker, docker_created, docker_log, listener_mapping]
+    compose_service: [docker]
+    cron_job: [cron]
+    timer: [cron]
+    script: [mtime, cron]
+    nginx_route: [nginx, nginx_access_log]
+    nginx_upstream: [nginx]
+    image: [docker]
+    volume: [docker]
+    network: [docker]

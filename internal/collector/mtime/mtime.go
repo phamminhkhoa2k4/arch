@@ -39,9 +39,8 @@ func (c *Collector) Name() string { return "mtime" }
 // Version implements collector.Collector.
 func (c *Collector) Version() string { return "1.0.0" }
 
-// Collect stats every recorded path. A vanished file is already
-// covered by the orphan findings of earlier epics; an unreadable path
-// becomes a blind spot.
+// Collect stats every recorded path. A vanished file needs no
+// modification time; an unreadable path becomes a blind spot.
 func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 	if c.index == nil {
 		return errors.New("mtime collector: no path index")
