@@ -1,0 +1,43 @@
+name: CI
+
+# Build, test and lint gates plus the correlation benchmark job.
+# A threshold miss prints a warning annotation and does not fail the run.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-lint:
+    name: Build, test, lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./...
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+
+  benchmark:
+    name: Correlation benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # The bench command prints ::warning annotations on a threshold
+      # miss and exits 0; tool errors fail the job.
+      - name: Benchmark
+        run: go run ./cmd/bench --db lab/fixtures/scan.db --gt lab/ground-truth.yaml
