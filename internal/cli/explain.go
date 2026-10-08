@@ -13,9 +13,8 @@ import (
 	"archaeologist/internal/store"
 )
 
-// newExplainCmd shows one component's evidence and blind spots from
-// the latest scan (US-6.4). The graph itself lands with the
-// correlation epic; this command stays evidence-first.
+// newExplainCmd shows one component's dependencies, evidence, and
+// blind spots from the latest scan.
 func newExplainCmd() *cobra.Command {
 	var dbPath string
 	cmd := &cobra.Command{
@@ -64,11 +63,15 @@ func runExplain(ctx context.Context, w io.Writer, dbPath, ref string) error {
 	if err != nil {
 		return err
 	}
+	neighbors, err := st.NeighborRows(ctx, scanID, ent.ID)
+	if err != nil {
+		return err
+	}
 	blinds, err := st.BlindSpotsFor(ctx, ent.ID)
 	if err != nil {
 		return err
 	}
-	return printExplain(w, scanID, ent, evid, blinds)
+	return printExplain(w, scanID, ent, evid, neighbors, blinds)
 }
 
 func printExplain(
@@ -76,6 +79,7 @@ func printExplain(
 	scanID int64,
 	ent store.EntityRow,
 	evid []store.EvidenceRow,
+	neighbors []store.NeighborRow,
 	blinds []store.BlindRow,
 ) error {
 	if _, err := fmt.Fprintf(w, "Component: %s — %s (scan #%d)\n", ent.Kind, ent.Name, scanID); err != nil {
@@ -118,6 +122,10 @@ func printExplain(
 		}
 	}
 
+	if err := printDependencies(w, neighbors); err != nil {
+		return err
+	}
+
 	if _, err := fmt.Fprintf(w, "Blind spots (%d):\n", len(blinds)); err != nil {
 		return err
 	}
@@ -129,6 +137,50 @@ func printExplain(
 	for _, b := range blinds {
 		if _, err := fmt.Fprintf(w, "  [%s] %s: %s\n", b.Channel, b.Reason, joinKV(b.Detail)); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// printDependencies renders the four explain groups:
+// one line per edge with strength, kind and neighbor, the evidence
+// source underneath. An isolated component gets a single line instead
+// of four empty groups.
+func printDependencies(w io.Writer, neighbors []store.NeighborRow) error {
+	if len(neighbors) == 0 {
+		_, err := fmt.Fprintln(w, "Phụ thuộc: (không có phụ thuộc nào được phát hiện)")
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Phụ thuộc (%d):\n", len(neighbors)); err != nil {
+		return err
+	}
+	for _, group := range []string{
+		store.GroupIncoming, store.GroupOutgoing,
+		store.GroupDeployedBy, store.GroupScheduledBy,
+	} {
+		var rows []store.NeighborRow
+		for _, n := range neighbors {
+			if n.Group == group {
+				rows = append(rows, n)
+			}
+		}
+		if _, err := fmt.Fprintf(w, "  %s (%d):\n", group, len(rows)); err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			if _, err := fmt.Fprintln(w, "    (không có)"); err != nil {
+				return err
+			}
+			continue
+		}
+		for _, r := range rows {
+			if _, err := fmt.Fprintf(w, "    [%s] %s — %s %s\n",
+				r.Strength, r.EdgeKind, r.NeighborKind, r.NeighborName); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "      nguồn: %s %s\n", r.Channel, r.RawRef); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
