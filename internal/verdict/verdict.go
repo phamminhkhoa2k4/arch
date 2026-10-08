@@ -7,6 +7,7 @@ package verdict
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"archaeologist/internal/rules"
@@ -151,6 +152,23 @@ func Compute(in Input, r rules.Rules, now time.Time) Result {
 		res.Coverage = coverageLevel(len(checked), len(applicable), res.WindowOK, r)
 		res.Action = fmt.Sprintf("⛔ KHÔNG an toàn để xóa — %d blocker cứng", len(res.Blockers))
 		return res
+	}
+
+	// Cycle-vs-window trap before every heuristic band: a cadence
+	// longer than the observed window never had a chance to fire at
+	// least once, so no orphan conclusion is allowed.
+	if reason, ok := cyclePeriodUnknown(in); ok {
+		res.State = StateUnknown
+		res.Coverage = coverageLevel(len(checked), len(applicable), res.WindowOK, r)
+		res.Reasons = []string{
+			reason,
+			fmt.Sprintf("evidence coverage %s — thiếu: %s", res.Coverage, missingOrNone(missing)),
+		}
+		res.Action = actionFor(res.State)
+		return res
+	}
+
+	switch {
 	case blindBlocked:
 		res.State = StateUnknown
 		res.Coverage = coverageLevel(len(checked), len(applicable), res.WindowOK, r)
@@ -175,11 +193,47 @@ func Compute(in Input, r rules.Rules, now time.Time) Result {
 		res.State = r.Verdicts.Fallback
 	}
 
+	// Short window hard cap: below the configured observation threshold
+	// no orphan conclusion is legal, whatever the rules file asks for.
+	capped := false
+	if !res.WindowOK &&
+		(res.State == StateOrphaned || res.State == StateLikelyOrphaned) {
+		res.State = StateUnknown
+		capped = true
+	}
+
 	if res.State != StateActive {
 		res.Reasons = reasons(in, res, r, len(checked), len(applicable))
+		if capped {
+			res.Reasons = append(res.Reasons,
+				"chưa đủ quan sát — không được kết luận LIKELY_ORPHANED/ORPHANED")
+		}
 		res.Action = actionFor(res.State)
 	}
 	return res
+}
+
+// cyclePeriodUnknown reports the schedule-vs-window trap: when the
+// entity's cadence (period_days) is longer than the observation
+// window, the scheduled work never had a fair chance to run inside
+// the window and the verdict must stay UNKNOWN instead of drifting
+// into an orphan band. Silent while window_days is 0 (no daemon
+// window yet) so pre-observation verdicts keep their old shape, and
+// silent when no cadence was parsed.
+func cyclePeriodUnknown(in Input) (string, bool) {
+	if in.Window.Days <= 0 {
+		return "", false
+	}
+	raw, ok := in.Attributes["period_days"]
+	if !ok || raw == "" {
+		return "", false
+	}
+	period, err := strconv.ParseFloat(raw, 64)
+	if err != nil || period <= float64(in.Window.Days) {
+		return "", false
+	}
+	return fmt.Sprintf("chu kỳ %s ngày > cửa sổ quan sát %d ngày — chưa có cơ hội chạy trong cửa sổ quan sát",
+		raw, in.Window.Days), true
 }
 
 // meets reports whether coverage/window satisfy one requirement block.
@@ -224,6 +278,16 @@ func reasons(in Input, res Result, r rules.Rules, checked, applicable int) []str
 	}
 	out = append(out, fmt.Sprintf("evidence coverage %s (%d/%d kênh áp dụng — thiếu: %s)",
 		res.Coverage, checked, applicable, missingOrNone(res.Missing)))
+	// Concrete schedule-run evidence when the scan probed it (cron and
+	// timer entities): the orphan bands must cite when the job last ran
+	// or that no run was seen at all.
+	if seen, probed := in.Attributes["last_run_at"]; probed {
+		if seen == "" {
+			out = append(out, "không thấy lần chạy trong journal/systemd")
+		} else {
+			out = append(out, fmt.Sprintf("lần chạy gần nhất: %s", seen))
+		}
+	}
 	return out
 }
 

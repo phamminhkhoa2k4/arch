@@ -704,3 +704,157 @@ func TestBlockersDedup(t *testing.T) {
 		t.Errorf("blockers = %d, want 1 after dedup: %s", n, codes(res.Blockers))
 	}
 }
+
+// --- observation window vs schedule cycle ---
+
+// coveredContainer is full deterministic coverage with a real window:
+// without an override it lands in an orphan band.
+func coveredContainer(days int, start, end string) Input {
+	in := baseInput("container")
+	in.Attributes["state"] = "running"
+	in.Attributes["created_at"] = "2026-10-01T00:00:00Z"
+	in.Evidence = []Evidence{
+		ev(1, "docker", "in_use", "deterministic", map[string]string{"state": "running"}),
+		ev(2, "docker_created", "neutral", "deterministic", map[string]string{"created_at": "2026-10-01T00:00:00Z"}),
+	}
+	in.Window = Window{Start: start, End: end, Days: days, Source: "observations"}
+	return in
+}
+
+func TestCyclePeriodLongerThanWindowForcesUnknown(t *testing.T) {
+	in := coveredContainer(14, "2026-09-24T00:00:00Z", "2026-10-08T00:00:00Z")
+	in.Attributes["period_days"] = "30" // monthly job inside a 14-day window
+	res := Compute(in, defaultRules(t), now)
+	if res.State != StateUnknown {
+		t.Errorf("state = %s, want UNKNOWN (monthly cadence cannot have run)", res.State)
+	}
+	joined := strings.Join(res.Reasons, "\n")
+	if !strings.Contains(joined, "chưa có cơ hội chạy trong cửa sổ quan sát") {
+		t.Errorf("reasons must state the no-fair-chance trap: %v", res.Reasons)
+	}
+	if strings.Contains(joined, "ORPHAN") {
+		t.Errorf("orphan wording must not appear: %v", res.Reasons)
+	}
+}
+
+func TestCyclePeriodRuleSilentWithoutWindow(t *testing.T) {
+	in := coveredContainer(0, "", "")
+	in.Attributes["period_days"] = "30"
+	res := Compute(in, defaultRules(t), now)
+	if strings.Contains(strings.Join(res.Reasons, "\n"), "cơ hội chạy") {
+		t.Errorf("rule must stay silent at window_days 0: %v", res.Reasons)
+	}
+}
+
+func TestCyclePeriodShorterThanWindowKeepsOrphanPath(t *testing.T) {
+	in := coveredContainer(37, "2026-09-01T00:00:00Z", "2026-10-08T00:00:00Z")
+	in.Attributes["period_days"] = "1"
+	res := Compute(in, defaultRules(t), now)
+	if res.State != StateOrphaned {
+		t.Errorf("state = %s, want ORPHANED (daily job ran many times)", res.State)
+	}
+	if strings.Contains(strings.Join(res.Reasons, "\n"), "cơ hội chạy") {
+		t.Errorf("no cycle trap expected: %v", res.Reasons)
+	}
+}
+
+func TestCyclePeriodYieldsToHardBlocker(t *testing.T) {
+	in := coveredContainer(14, "2026-09-24T00:00:00Z", "2026-10-08T00:00:00Z")
+	in.Attributes["period_days"] = "30"
+	in.Observations = []Observation{{ID: 7, LastSeenAt: "2026-10-07T10:00:00Z", Count: 4}}
+	res := Compute(in, defaultRules(t), now)
+	if res.State != StateActive || !hasCode(res.Blockers, "B2") {
+		t.Errorf("state=%s blockers=%s, want ACTIVE/B2 (blockers outrank the trap)",
+			res.State, codes(res.Blockers))
+	}
+}
+
+// --- access-log freshness band (D4) ---
+
+func TestB2AccessLogStaleBeforeActivityBandDoesNotBlock(t *testing.T) {
+	in := baseInput("nginx_route")
+	in.Evidence = []Evidence{
+		ev(1, "nginx", "neutral", "deterministic", nil),
+		ev(2, "nginx_access_log", "in_use", "deterministic",
+			map[string]string{"last_request_at": "2026-09-03T09:00:00Z", "count": "5"}),
+	}
+	// window end 2026-10-08 minus 30 days = 2026-09-08: the request is
+	// after window start but outside the activity band.
+	res := Compute(in, defaultRules(t), now)
+	if hasCode(res.Blockers, "B2") {
+		t.Errorf("stale access-log traffic must not block: %s", codes(res.Blockers))
+	}
+}
+
+func TestB2AccessLogNoWindowEndSkipsLogBranch(t *testing.T) {
+	in := baseInput("nginx_route")
+	in.Window = Window{Start: "", End: "", Days: 0, Source: "none"}
+	in.Evidence = []Evidence{
+		ev(1, "nginx", "neutral", "deterministic", nil),
+		ev(2, "nginx_access_log", "in_use", "deterministic",
+			map[string]string{"last_request_at": "2026-10-07T09:00:00Z", "count": "5"}),
+	}
+	res := Compute(in, defaultRules(t), now)
+	if hasCode(res.Blockers, "B2") {
+		t.Errorf("without a window end the freshness band has no bound: %s", codes(res.Blockers))
+	}
+}
+
+// --- last-run evidence in reasons (D8b) ---
+
+func TestReasonsCiteLastRunWhenProbed(t *testing.T) {
+	in := coveredContainer(37, "2026-09-01T00:00:00Z", "2026-10-08T00:00:00Z")
+	in.Attributes["last_run_at"] = "2026-10-01T02:00:00Z"
+	res := Compute(in, defaultRules(t), now)
+	joined := strings.Join(res.Reasons, "\n")
+	if !strings.Contains(joined, "lần chạy gần nhất: 2026-10-01T02:00:00Z") {
+		t.Errorf("orphan reasons must cite the last run: %v", res.Reasons)
+	}
+}
+
+func TestReasonsSayNoRunSeenWhenProbedAndEmpty(t *testing.T) {
+	in := coveredContainer(37, "2026-09-01T00:00:00Z", "2026-10-08T00:00:00Z")
+	in.Attributes["last_run_at"] = ""
+	res := Compute(in, defaultRules(t), now)
+	if !strings.Contains(strings.Join(res.Reasons, "\n"), "không thấy lần chạy") {
+		t.Errorf("reasons must state no run was seen: %v", res.Reasons)
+	}
+}
+
+// --- short window is a hard cap ---
+
+func TestShortWindowNeverReachesOrphanBand(t *testing.T) {
+	for _, days := range []int{0, 3, 13} {
+		in := coveredContainer(days, "2026-10-05T00:00:00Z", "2026-10-08T00:00:00Z")
+		res := Compute(in, defaultRules(t), now)
+		if res.State == StateOrphaned || res.State == StateLikelyOrphaned {
+			t.Errorf("days=%d state=%s, want no orphan band under threshold", days, res.State)
+		}
+		if !strings.Contains(strings.Join(res.Reasons, "\n"), "cửa sổ quan sát") {
+			t.Errorf("days=%d reasons must cite the window: %v", days, res.Reasons)
+		}
+	}
+}
+
+func TestShortWindowCapBeatsPermissiveFallback(t *testing.T) {
+	r := defaultRules(t)
+	r.Verdicts.Fallback = StateLikelyOrphaned // permissive override
+
+	short := coveredContainer(3, "2026-10-05T00:00:00Z", "2026-10-08T00:00:00Z")
+	res := Compute(short, r, now)
+	if res.State != StateUnknown {
+		t.Errorf("short window state = %s, want UNKNOWN despite fallback", res.State)
+	}
+	if !strings.Contains(strings.Join(res.Reasons, "\n"), "chưa đủ quan sát") {
+		t.Errorf("capped reasons must say the window is insufficient: %v", res.Reasons)
+	}
+
+	full := coveredContainer(37, "2026-09-01T00:00:00Z", "2026-10-08T00:00:00Z")
+	res = Compute(full, r, now)
+	if res.State != StateOrphaned {
+		t.Errorf("full window state = %s, want ORPHANED (cap is window-driven)", res.State)
+	}
+	if strings.Contains(strings.Join(res.Reasons, "\n"), "chưa đủ quan sát") {
+		t.Errorf("cap reason must not appear on a sufficient window: %v", res.Reasons)
+	}
+}

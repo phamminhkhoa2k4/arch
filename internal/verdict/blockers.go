@@ -77,8 +77,10 @@ func blockerB1(in Input) []Item {
 }
 
 // B2: an inbound connection inside the observation window — an
-// observation bucket on or after window start, or recent nginx
-// access-log traffic on a route.
+// observation bucket on or after window start, or nginx access-log
+// traffic inside the activity freshness band (window end minus
+// no_activity_days: the log branch must not stay hot for the whole
+// window when the log itself shows how stale it is).
 func blockerB2(in Input, r rules.Rules) []Item {
 	var out []Item
 	start := in.Window.Start
@@ -93,12 +95,16 @@ func blockerB2(in Input, r rules.Rules) []Item {
 			RawRef:     "observations#" + fmt.Sprint(o.ID),
 		})
 	}
+	cutoff := accesslogCutoff(in.Window, r.Thresholds.NoActivityDays)
+	if cutoff == "" {
+		return out // no usable window end: nothing to bound freshness against
+	}
 	for _, e := range in.Evidence {
 		if e.Channel != "nginx_access_log" || e.Polarity != "in_use" ||
 			e.Strength == "weak_heuristic" {
 			continue
 		}
-		if !afterOrEqual(e.Value["last_request_at"], start) {
+		if !afterOrEqual(e.Value["last_request_at"], cutoff) {
 			continue
 		}
 		out = append(out, Item{
@@ -357,6 +363,20 @@ func contains(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// accesslogCutoff is the newest last_request_at that still counts as
+// activity: no_activity_days before the window end. Empty when the
+// window has no parsable end (freshness cannot be bounded).
+func accesslogCutoff(w Window, noActivityDays int) string {
+	if w.End == "" || noActivityDays < 0 {
+		return ""
+	}
+	end, err := parseTime(w.End)
+	if err != nil {
+		return ""
+	}
+	return end.AddDate(0, 0, -noActivityDays).Format(time.RFC3339)
 }
 
 // afterOrEqual compares RFC3339 timestamps; an unparsable or empty

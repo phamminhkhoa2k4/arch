@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +14,7 @@ import (
 
 	"archaeologist/internal/collector"
 	"archaeologist/internal/store"
+	"archaeologist/internal/verdict"
 )
 
 // seedUnitPair stores two active units with evidence and a
@@ -385,4 +387,22 @@ func writeRules(t *testing.T, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// The window line always names the full observation interval and its
+// day count — no "no traffic" conclusion ships without it.
+func TestPrintDeleteCheckShowsWindowInterval(t *testing.T) {
+	var buf bytes.Buffer
+	res := verdict.Result{
+		State:  verdict.StateUnknown,
+		Window: verdict.Window{Start: "2026-09-01T00:00:00Z", End: "2026-10-08T00:00:00Z", Days: 37, Source: "observations"},
+		Action: "chưa đủ bằng chứng",
+	}
+	if err := printDeleteCheck(&buf, res); err != nil {
+		t.Fatalf("printDeleteCheck: %v", err)
+	}
+	want := "Cửa sổ quan sát: 2026-09-01T00:00:00Z → 2026-10-08T00:00:00Z (37 ngày)"
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("output missing %q:\n%s", want, buf.String())
+	}
 }
