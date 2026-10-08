@@ -18,6 +18,7 @@ type EntityRow struct {
 
 // EvidenceRow describes one evidence row as listed by explain.
 type EvidenceRow struct {
+	ID         int64
 	Polarity   string
 	Channel    string
 	Strength   string
@@ -98,7 +99,7 @@ func (s *Store) queryEntities(ctx context.Context, query string, args ...any) ([
 // EvidenceFor lists one entity's evidence rows in insertion order.
 func (s *Store) EvidenceFor(ctx context.Context, entityID int64) ([]EvidenceRow, error) {
 	rs, err := s.db.QueryContext(ctx,
-		`SELECT polarity, channel, strength, observed_at, raw_ref, value_json
+		`SELECT id, polarity, channel, strength, observed_at, raw_ref, value_json
 		 FROM evidence WHERE entity_id = ? ORDER BY id`, entityID)
 	if err != nil {
 		return nil, fmt.Errorf("evidence for %d: %w", entityID, err)
@@ -109,7 +110,7 @@ func (s *Store) EvidenceFor(ctx context.Context, entityID int64) ([]EvidenceRow,
 	for rs.Next() {
 		var r EvidenceRow
 		var valueJSON string
-		if err := rs.Scan(&r.Polarity, &r.Channel, &r.Strength, &r.ObservedAt, &r.RawRef, &valueJSON); err != nil {
+		if err := rs.Scan(&r.ID, &r.Polarity, &r.Channel, &r.Strength, &r.ObservedAt, &r.RawRef, &valueJSON); err != nil {
 			return nil, fmt.Errorf("evidence for %d: %w", entityID, err)
 		}
 		r.Value = map[string]string{}
