@@ -120,7 +120,7 @@ install -m 644 /opt/lab/cron/lab-backup /opt/lab/cron/lab-monthly /opt/lab/cron/
 grep -qF '/opt/lab/scripts/heartbeat.sh' /etc/crontab ||
   echo '17 * * * * root /opt/lab/scripts/heartbeat.sh' >>/etc/crontab
 # 2 lines in root's crontab (append when missing); rotate-logs-gone.sh
-# intentionally does NOT exist → ground truth ORPHAN_CRON (US-5.4)
+# intentionally does NOT exist → ground truth ORPHAN_CRON
 cur="$(crontab -l 2>/dev/null || true)"
 add=false
 printf '%s\n' "$cur" | grep -qF '/opt/lab/scripts/monitor.sh' || add=true
@@ -156,7 +156,7 @@ n=$(docker ps --format '{{.Names}}' | grep -c '^lab-' || true)
 [ "$n" -eq 6 ] || { echo "FAIL: want 6 lab containers, got $n"; exit 1; }
 echo "OK 6 containers"
 
-# US-6.1/6.2: one request per live route fills lab_access.log, one echo
+# One request per live route fills lab_access.log, one echo
 # guarantees a docker log line. Only /web/ and /pool/ — /var/, /dead/ and
 # /ext/ must stay without access-log evidence in ground-truth.
 curl -fsS -o /dev/null http://127.0.0.1:8080/web/ || echo "WARN /web/ non-2xx"

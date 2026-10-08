@@ -1,4 +1,4 @@
--- Archaeologist v0.1 schema — authority: specs.md §3, ADR 0001.
+-- Archaeologist v0.1 schema.
 -- Append-only per scan: rows carry scan_id; evidence is never rewritten.
 
 CREATE TABLE IF NOT EXISTS hosts (

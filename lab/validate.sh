@@ -93,7 +93,7 @@ grep -q '\$lab_backend' /etc/nginx/conf.d/lab.conf 2>/dev/null && trap_variable=
 nginx_ok=no
 systemctl is-active --quiet nginx && nginx_ok=yes || true
 
-# US-6.1: one request per live route so lab_access.log has entries even on
+# One request per live route so lab_access.log has entries even on
 # a freshly restarted lab, then count them.
 curl -fsS -o /dev/null http://127.0.0.1:8080/web/ || true
 curl -fsS -o /dev/null http://127.0.0.1:8080/pool/ || true

@@ -42,7 +42,7 @@ type fakeIndex struct {
 
 func (f *fakeIndex) PathRows() ([]collector.PathRow, error) { return f.rows, f.err }
 
-// US-6.3 AC2: mtime becomes a neutral signal with the exact mtime and
+// mtime becomes a neutral signal with the exact mtime and
 // age; the entity is never re-upserted (evidence only).
 func TestCollectMtimeEvidence(t *testing.T) {
 	dir := t.TempDir()

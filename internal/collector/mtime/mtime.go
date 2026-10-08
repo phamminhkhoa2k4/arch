@@ -1,6 +1,6 @@
 // Package mtime collects filesystem modification times for the
 // file-backed entities recorded earlier in the scan (scripts,
-// binaries) as neutral activity signals for later rules (US-6.3).
+// binaries) as neutral activity signals for later rules.
 //
 // Evidence only: attributes belong to the collectors that own the
 // entities, so this collector never upserts.

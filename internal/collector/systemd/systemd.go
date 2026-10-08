@@ -74,7 +74,7 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 	}
 
 	// Pass 1: every unit becomes an entity with its state evidence.
-	// Active units also consult the journal for last_log_at (US-6.2);
+	// Active units also consult the journal for last_log_at;
 	// the first read failure yields one host-wide blind spot and the
 	// remaining units are skipped instead of hammering a broken source.
 	present := map[string]bool{}

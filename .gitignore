@@ -22,3 +22,5 @@ out/
 
 docs/
 *.md
+# Golden fixture for the CI benchmark
+!lab/fixtures/scan.db

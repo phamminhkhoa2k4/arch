@@ -1,2 +1,2 @@
-# Lab cron — macro @reboot (US-5.1 parser test).
+# Lab cron — macro @reboot (parser test).
 @reboot root /opt/lab/scripts/boot.sh

@@ -232,7 +232,7 @@ func TestCollectJobsScriptsTimerAndEdges(t *testing.T) {
 		}
 	}
 
-	// Daily job cadence attrs (US-5.2).
+	// Daily job cadence attrs.
 	hb := s.entities["cron_job|/etc/crontab#root#/opt/lab/scripts/heartbeat.sh"]
 	if hb.Attributes["schedule"] != "17 * * * *" ||
 		hb.Attributes["period_days"] != "0.0417" ||

@@ -543,7 +543,7 @@ func TestCollectTcp6ListenerMatchesPublishedPort(t *testing.T) {
 	}
 }
 
-// US-6.3: docker_created evidence carries the inspect Created
+// docker_created evidence carries the inspect Created
 // timestamp as last_deploy_at, neutral polarity, traceable raw_ref.
 func TestCollectCreatedEvidence(t *testing.T) {
 	api := baseInventory()
@@ -571,7 +571,7 @@ func TestCollectCreatedEvidence(t *testing.T) {
 	}
 }
 
-// US-6.2: readable driver with a log line → docker_log evidence and a
+// readable driver with a log line → docker_log evidence and a
 // last_log_at attribute folded into the same entity upsert.
 func TestCollectLogEvidence(t *testing.T) {
 	api := baseInventory()
@@ -603,7 +603,7 @@ func TestCollectLogEvidence(t *testing.T) {
 	}
 }
 
-// US-6.2 AC3: a driver that cannot be read becomes a blind spot and
+// a driver that cannot be read becomes a blind spot and
 // that container never reaches the log API.
 func TestCollectUnsupportedLogDriverBlind(t *testing.T) {
 	api := baseInventory()

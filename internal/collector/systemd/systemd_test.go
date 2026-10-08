@@ -390,7 +390,7 @@ func (j *fakeJournal) LastLine(_ context.Context, unit string) (time.Time, strin
 	return ts, j.cursors[unit], true, nil
 }
 
-// US-6.2: active units get last_log_at folded into the same entity
+// Active units get last_log_at folded into the same entity
 // upsert plus a journald evidence row; inactive units are not queried.
 func TestCollectJournalEvidence(t *testing.T) {
 	ts := time.Date(2026, 10, 6, 9, 15, 0, 0, time.UTC)

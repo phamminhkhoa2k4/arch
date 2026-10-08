@@ -99,7 +99,7 @@ func TestWindowSufficiency(t *testing.T) {
 		t.Error("daily must fit a 14-day window")
 	}
 	if ParseSched("0 0 1 * *", base).Sufficient() {
-		t.Error("monthly must NOT fit a 14-day window (US-5.2 signal)")
+		t.Error("monthly must NOT fit a 14-day window")
 	}
 	if ParseSched("@reboot", base).Sufficient() {
 		t.Error("unknown period must not claim sufficiency")

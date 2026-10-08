@@ -126,7 +126,7 @@ func collectWith(t *testing.T, root string, fsys *memLogFS) *recSink {
 	return sink
 }
 
-// US-6.1: matched traffic becomes in_use evidence with last_request_at
+// Matched traffic becomes in_use evidence with last_request_at
 // and a file:line raw_ref; unmatched URIs and unparsable lines are
 // handled (blind), never dropped silently.
 func TestCollectRouteEvidence(t *testing.T) {
@@ -215,7 +215,7 @@ func TestCollectCustomFormatBlind(t *testing.T) {
 	}
 }
 
-// US-6.1 AC2: rotation of at most seven days attaches a
+// Rotation of at most seven days attaches a
 // log_retention_short blind spot to every route; longer windows and
 // no rotation stay silent.
 func TestCollectRetentionShortBlind(t *testing.T) {
