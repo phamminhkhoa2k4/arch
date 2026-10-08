@@ -10,12 +10,16 @@ import (
 // Sock is one socket row from /proc/net/tcp or /proc/net/tcp6.
 type Sock struct {
 	Proto string // "tcp" or "tcp6" — set by the parser caller
-	Addr  string // numeric IP (decoded from the hex little-endian form)
+	Addr  string // local numeric IP (decoded from the hex little-endian form)
 	Port  int
-	State string // hex state, "0A" = LISTEN
-	UID   int
-	Inode uint64
-	Sl    int // socket line number (field "sl") for raw_ref
+	// RemoteAddr and RemotePort decode the rem_address field (field 2).
+	// A LISTEN row reports 0.0.0.0:0.
+	RemoteAddr string
+	RemotePort int
+	State      string // hex state, "0A" = LISTEN
+	UID        int
+	Inode      uint64
+	Sl         int // socket line number (field "sl") for raw_ref
 }
 
 // IsLISTEN reports whether the socket is a listener (state 0A).
@@ -45,6 +49,10 @@ func ParseTCPTable(proto string, data []byte) ([]Sock, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s sl=%d: %w", proto, sl, err)
 		}
+		remoteAddr, remotePort, err := decodeAddrPort(f[2], proto == "tcp6")
+		if err != nil {
+			return nil, fmt.Errorf("%s sl=%d remote: %w", proto, sl, err)
+		}
 		uid, err := strconv.Atoi(f[7])
 		if err != nil {
 			return nil, fmt.Errorf("%s sl=%d uid: %w", proto, sl, err)
@@ -54,8 +62,9 @@ func ParseTCPTable(proto string, data []byte) ([]Sock, error) {
 			return nil, fmt.Errorf("%s sl=%d inode: %w", proto, sl, err)
 		}
 		socks = append(socks, Sock{
-			Proto: proto, Addr: addr, Port: port, State: f[3],
-			UID: uid, Inode: inode, Sl: sl,
+			Proto: proto, Addr: addr, Port: port,
+			RemoteAddr: remoteAddr, RemotePort: remotePort,
+			State: f[3], UID: uid, Inode: inode, Sl: sl,
 		})
 	}
 	return socks, nil
