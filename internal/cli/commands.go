@@ -18,11 +18,7 @@ func stub() func(*cobra.Command, []string) {
 func addCommands(root *cobra.Command) {
 	root.AddCommand(
 		newScanCmd(),
-		&cobra.Command{
-			Use:   "observe",
-			Short: "Sample network activity to measure real usage over time",
-			Run:   stub(),
-		},
+		newObserveCmd(),
 		newExplainCmd(),
 		newDeleteCheckCmd(),
 		&cobra.Command{

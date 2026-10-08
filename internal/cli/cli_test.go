@@ -56,9 +56,9 @@ func TestStubCommandsSayNotImplemented(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetErr(buf)
-	root.SetArgs([]string{"observe"})
+	root.SetArgs([]string{"report"})
 	if err := root.Execute(); err != nil {
-		t.Fatalf("observe: %v", err)
+		t.Fatalf("report: %v", err)
 	}
 	if !strings.Contains(buf.String(), "not implemented yet") {
 		t.Fatalf("stub output = %q", buf.String())
