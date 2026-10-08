@@ -1,7 +1,6 @@
 # Infrastructure Archaeologist — local validation entrypoints.
-# Authority: product-backlog.md US-0.4 (CI runs build+test+lint).
 
-.PHONY: build test lint check cross
+.PHONY: build test lint check cross bench
 
 build:
 	go build ./...
@@ -15,7 +14,11 @@ lint:
 ## check: the three gates CI will run (build, test, lint).
 check: build test lint
 
-## cross: verify linux/amd64 + linux/arm64 binaries compile (US-0.4 AC).
+## bench: correlation quality report on the golden fixture.
+bench:
+	go run ./cmd/bench --db lab/fixtures/scan.db --gt lab/ground-truth.yaml
+
+## cross: verify linux/amd64 + linux/arm64 binaries compile.
 cross:
 	GOOS=linux GOARCH=amd64 go build -o /tmp/archaeologist-amd64 ./cmd/archaeologist
 	GOOS=linux GOARCH=arm64 go build -o /tmp/archaeologist-arm64 ./cmd/archaeologist
