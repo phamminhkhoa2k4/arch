@@ -96,6 +96,8 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion string) error
 			cIdx = index
 			mIdx = index
 		}
+		cc := ccoll.New(systemd.OSFS{}, cIdx)
+		cc.SetLastRun(ccoll.NewExecLastRun())
 		return []collector.Collector{
 			process.New(fs),
 			listener.New(fs),
@@ -103,7 +105,7 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion string) error
 			dcoll.New(dengine.NewClient(dengine.DefaultSocket), compose.NewLoader(), dIdx),
 			ncoll.New(nginx.NewLoader(), nIdx),
 			acoll.New(nginx.NewLoader(), nil),
-			ccoll.New(systemd.OSFS{}, cIdx),
+			cc,
 			mcoll.New(mIdx),
 		}
 	}

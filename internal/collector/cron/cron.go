@@ -38,6 +38,9 @@ type Collector struct {
 	timerDir string
 	index    Index
 	seen     map[string]bool // evidence refs emitted this run
+	lastRun  LastRun         // nil: no journal/systemd probing
+	cronRuns map[string]time.Time
+	probed   bool
 }
 
 // New creates the cron collector. fsys may be nil (reads the real
@@ -58,6 +61,10 @@ func New(fsys systemd.FS, index Index) *Collector {
 // Name implements collector.Collector.
 func (c *Collector) Name() string { return "cron" }
 
+// SetLastRun enables journal/systemd probing of when each job last
+// ran; without it the schedule entities carry no last_run_at attribute.
+func (c *Collector) SetLastRun(lr LastRun) { c.lastRun = lr }
+
 // Version implements collector.Collector.
 func (c *Collector) Version() string { return "1.0.0" }
 
@@ -66,6 +73,14 @@ func (c *Collector) Version() string { return "1.0.0" }
 func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 	now := time.Now()
 	c.seen = map[string]bool{}
+
+	// One journal read per scan feeds every job's last_run_at.
+	c.cronRuns, c.probed = nil, false
+	if c.lastRun != nil {
+		if runs, err := c.lastRun.CronRuns(ctx); err == nil {
+			c.cronRuns, c.probed = runs, true
+		}
+	}
 
 	cfg := c.loader.Load()
 	for _, fe := range cfg.Errors {
@@ -106,7 +121,7 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := c.collectTimer(sink, &timers[i], now, units); err != nil {
+		if err := c.collectTimer(ctx, sink, &timers[i], now, units); err != nil {
 			return err
 		}
 	}
@@ -162,6 +177,14 @@ func (c *Collector) collectJob(
 	sched := cron.ParseSched(job.Schedule, now)
 	if sched.Valid {
 		applySchedule(attrs, sched)
+	}
+	if c.probed {
+		// Empty means the probe ran and saw no run in the journal —
+		// distinct from "not probed", where the key stays absent.
+		attrs["last_run_at"] = ""
+		if t, ok := c.cronRuns[job.Command]; ok {
+			attrs["last_run_at"] = t.UTC().Format(time.RFC3339)
+		}
 	}
 	if err := sink.UpsertEntity(collector.Entity{
 		Kind:        "cron_job",
@@ -410,6 +433,7 @@ func (c *Collector) tracePath(
 // collectTimer writes one timer entity, its schedule evidence and the
 // scheduled_by edge from its target unit.
 func (c *Collector) collectTimer(
+	ctx context.Context,
 	sink collector.Sink,
 	t *cron.Timer,
 	now time.Time,
@@ -425,6 +449,12 @@ func (c *Collector) collectTimer(
 	}
 	if t.Unit != "" {
 		attrs["unit"] = t.Unit
+	}
+	if c.lastRun != nil {
+		attrs["last_run_at"] = ""
+		if ts, ok, err := c.lastRun.TimerTrigger(ctx, t.Name); err == nil && ok {
+			attrs["last_run_at"] = ts.UTC().Format(time.RFC3339)
+		}
 	}
 	calendarOK := false
 	if t.OnCalendar != "" {
