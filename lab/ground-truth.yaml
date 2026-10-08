@@ -124,27 +124,27 @@ components:
     kind: cron_job
     name: "rotate-logs-gone (root crontab, 06:00 Sunday)"
     expected: ORPHANED
-    reason: "lịch weekly vẫn parse; script /opt/lab/scripts/rotate-logs-gone.sh không tồn tại → ORPHAN_CRON (US-5.4)"
+    reason: "lịch weekly vẫn parse; script /opt/lab/scripts/rotate-logs-gone.sh không tồn tại → ORPHAN_CRON"
 
   - id: cron-boot
     kind: cron_job
     name: "lab-boot (/etc/cron.d, @reboot)"
     expected: ACTIVE
-    reason: "macro @reboot — test parser macro (US-5.1)"
+    reason: "macro @reboot — test parser macro"
 
   # ---------- systemd timer (1) ----------
   - id: timer-lab-watchdog
     kind: timer
     name: lab-watchdog.timer
     expected: ACTIVE
-    reason: "OnCalendar 03:30 daily → period 1 ngày; Unit=lab-batch.service → cạnh scheduled_by (US-5.1)"
+    reason: "OnCalendar 03:30 daily → period 1 ngày; Unit=lab-batch.service → cạnh scheduled_by"
 
   # ---------- nginx routes (5) + upstream (1) ----------
   - id: route-web
     kind: nginx_route
     name: "/web/ (port 8080)"
     expected: ACTIVE
-    reason: "proxy_pass http://127.0.0.1:8081/ tĩnh → listener của lab-web, deterministic; up.sh curl /web/ → evidence nginx_access_log/last_request_at (US-6.1)"
+    reason: "proxy_pass http://127.0.0.1:8081/ tĩnh → listener của lab-web, deterministic; up.sh curl /web/ → evidence nginx_access_log/last_request_at"
 
   - id: route-var
     kind: nginx_route
@@ -157,22 +157,131 @@ components:
     kind: nginx_route
     name: "/dead/ (port 8080)"
     expected: BROKEN
-    reason: "proxy_pass http://127.0.0.1:9999/ cố tình trỏ port không ai nghe — ground-truth case BROKEN_ROUTE, scan phải finding đúng mỗi route này (US-4.3)"
+    reason: "proxy_pass http://127.0.0.1:9999/ cố tình trỏ port không ai nghe — ground-truth case BROKEN_ROUTE, scan phải finding đúng mỗi route này"
 
   - id: route-pool
     kind: nginx_route
     name: "/pool/ (port 8080)"
     expected: ACTIVE
-    reason: "proxy_pass http://lab_pool/ → upstream; mỗi member (8081 lab-web, 8082 lab-api) có cạnh proxies_to listener (US-4.2); up.sh curl /pool/ → evidence nginx_access_log/last_request_at (US-6.1)"
+    reason: "proxy_pass http://lab_pool/ → upstream; mỗi member (8081 lab-web, 8082 lab-api) có cạnh proxies_to listener; up.sh curl /pool/ → evidence nginx_access_log/last_request_at"
 
   - id: route-ext
     kind: nginx_route
     name: "/ext/ (port 8080)"
     expected: EXTERNAL
-    reason: "proxy_pass https://example.com/ ngoài host — attrs upstream_scope=external, không cạnh, không blind spot (US-4.2)"
+    reason: "proxy_pass https://example.com/ ngoài host — attrs upstream_scope=external, không cạnh, không blind spot"
 
   - id: upstream-pool
     kind: nginx_upstream
     name: "lab_pool"
     expected: ACTIVE
-    reason: "upstream 2 member cùng có cạnh proxies_to listener, không chỉ server đầu (US-4.2)"
+    reason: "upstream 2 member cùng có cạnh proxies_to listener, không chỉ server đầu"
+
+# ---------- correlation benchmark ----------
+# Listeners lab-critical: match theo proto+addr+port (bỏ inode — thay đổi
+# mỗi scan). expected_owner = kind+name entity trong scan.
+listeners:
+  - id: listener-nginx-8080
+    proto: tcp
+    addr: "0.0.0.0"
+    port: 8080
+    expected_owner:
+      kind: systemd_unit
+      name: nginx.service
+    reason: "server nginx lab listens 8080, chủ = nginx.service qua process"
+
+  - id: listener-web-8081
+    proto: tcp
+    addr: "0.0.0.0"
+    port: 8081
+    expected_owner:
+      kind: container
+      name: lab-web
+    reason: "docker publish 8081 → container lab-web, cạnh listens_on trực tiếp"
+
+  - id: listener-web-8081-v6
+    proto: tcp6
+    addr: "::"
+    port: 8081
+    expected_owner:
+      kind: container
+      name: lab-web
+    reason: "bản IPv6 của publish 8081"
+
+  - id: listener-api-8082
+    proto: tcp
+    addr: "0.0.0.0"
+    port: 8082
+    expected_owner:
+      kind: container
+      name: lab-api
+    reason: "docker publish 8082 → container lab-api"
+
+  - id: listener-api-8082-v6
+    proto: tcp6
+    addr: "::"
+    port: 8082
+    expected_owner:
+      kind: container
+      name: lab-api
+    reason: "bản IPv6 của publish 8082"
+
+  - id: listener-cache-6379
+    proto: tcp
+    addr: "127.0.0.1"
+    port: 6379
+    expected_owner:
+      kind: container
+      name: lab-cache
+    reason: "redis lab-cache chỉ bind loopback"
+
+  - id: listener-external-api-9090
+    proto: tcp
+    addr: "0.0.0.0"
+    port: 9090
+    expected_owner:
+      kind: systemd_unit
+      name: lab-external-api.service
+    reason: "unit lab-external-api (bẫy external_caller) giữ cổng 9090"
+
+  - id: listener-app-9099
+    proto: tcp
+    addr: "0.0.0.0"
+    port: 9099
+    expected_owner:
+      kind: systemd_unit
+      name: lab-app.service
+    reason: "unit lab-app giữ cổng 9099"
+
+# Chuỗi route đơn giản — benchmark "Chuỗi route đúng" (mục tiêu 100%).
+# expected: mỗi tuple phải tồn tại listener (proto+port) trong chuỗi
+# proxies_to ( BFS qua upstream ) với owner kỳ vọngreachable deterministic.
+route_chains:
+  - id: chain-web
+    location: "/web/"
+    file: lab.conf
+    simple: true
+    expected:
+      - proto: tcp
+        port: 8081
+        owner:
+          kind: container
+          name: lab-web
+    reason: "route tĩnh đơn giản nhất: proxy thẳng listener lab-web"
+
+  - id: chain-pool
+    location: "/pool/"
+    file: lab.conf
+    simple: true
+    expected:
+      - proto: tcp
+        port: 8081
+        owner:
+          kind: container
+          name: lab-web
+      - proto: tcp
+        port: 8082
+        owner:
+          kind: container
+          name: lab-api
+    reason: "qua upstream lab_pool — cả 2 member phải chain đúng, không chỉ server đầu"
