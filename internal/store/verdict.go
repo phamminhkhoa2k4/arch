@@ -234,9 +234,16 @@ func (s *Store) edgeEvidence(ctx context.Context, scanID int64, kind string, a, 
 }
 
 func (s *Store) inputObservations(ctx context.Context, entityID int64) ([]verdict.Observation, error) {
+	// Buckets stay attached to the entity that was current when the
+	// daemon wrote them; twins under the same identity key in a newer
+	// scan keep contributing (the daemon does not migrate rows).
 	rs, err := s.db.QueryContext(ctx,
-		`SELECT id, last_seen_at, count FROM observations
-		 WHERE entity_id = ? ORDER BY id`, entityID)
+		`SELECT o.id, o.last_seen_at, o.count
+		 FROM observations o
+		 JOIN entities cur ON cur.id = ?
+		 JOIN entities twin ON twin.identity_key = cur.identity_key
+		 WHERE o.entity_id = twin.id
+		 ORDER BY o.id`, entityID)
 	if err != nil {
 		return nil, fmt.Errorf("build input: observations: %w", err)
 	}
@@ -252,19 +259,19 @@ func (s *Store) inputObservations(ctx context.Context, entityID int64) ([]verdic
 	return out, rs.Err()
 }
 
-// inputWindow derives the observation window: real observation
-// buckets when the daemon has written any, otherwise host age at the
-// last scan. Ingest will refine the source and the sufficiency rule.
-// inputWindow derives the observation window per the plan: start =
-// earliest observation bucket when the daemon has written any,
-// otherwise host first-seen; end = latest evidence observation capped
-// below by start. Ingest will refine the source and the sufficiency rule.
+// inputWindow derives the observation window per D3: start = earliest
+// observation bucket reachable through the entity's identity key in
+// any scan (so the window survives rescans), otherwise host
+// first-seen; end = the later of the latest evidence observation and
+// the latest observation bucket, capped below by start.
 func (s *Store) inputWindow(ctx context.Context, scanID int64) (verdict.Window, error) {
 	var start sql.NullString
 	err := s.db.QueryRowContext(ctx,
 		`SELECT MIN(o.bucket_start)
-		 FROM observations o JOIN entities e ON e.id = o.entity_id
-		 WHERE e.scan_id = ?`, scanID).Scan(&start)
+		 FROM observations o
+		 JOIN entities old ON old.id = o.entity_id
+		 JOIN entities cur ON cur.identity_key = old.identity_key
+		 WHERE cur.scan_id = ?`, scanID).Scan(&start)
 	if err != nil {
 		return verdict.Window{}, fmt.Errorf("build input: window: %w", err)
 	}
@@ -291,19 +298,44 @@ func (s *Store) inputWindow(ctx context.Context, scanID int64) (verdict.Window, 
 		 WHERE en.scan_id = ?`, scanID).Scan(&latestEvidence); err != nil {
 		return verdict.Window{}, fmt.Errorf("build input: window: %w", err)
 	}
+	var latestObserved sql.NullString
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT MAX(o.last_seen_at)
+		 FROM observations o
+		 JOIN entities old ON old.id = o.entity_id
+		 JOIN entities cur ON cur.identity_key = old.identity_key
+		 WHERE cur.scan_id = ?`, scanID).Scan(&latestObserved); err != nil {
+		return verdict.Window{}, fmt.Errorf("build input: window: %w", err)
+	}
 	w.End = w.Start
-	if latestEvidence.Valid && latestEvidence.String != "" {
-		w.End = latestEvidence.String
-		if w.Start != "" {
-			if endT, err1 := parseStamp(w.End); err1 == nil {
-				if startT, err2 := parseStamp(w.Start); err2 == nil && endT.Before(startT) {
-					w.End = w.Start
-				}
+	for _, cand := range []sql.NullString{latestEvidence, latestObserved} {
+		if !cand.Valid || cand.String == "" {
+			continue
+		}
+		if w.End == w.Start || stampAfter(cand.String, w.End) {
+			w.End = cand.String
+		}
+	}
+	if w.End != w.Start {
+		if endT, err1 := parseStamp(w.End); err1 == nil {
+			if startT, err2 := parseStamp(w.Start); err2 == nil && endT.Before(startT) {
+				w.End = w.Start
 			}
 		}
 	}
 	w.Days = windowDays(w.Start, w.End)
 	return w, nil
+}
+
+// stampAfter reports whether a is strictly later than b; unparsable
+// stamps never win.
+func stampAfter(a, b string) bool {
+	ta, errA := parseStamp(a)
+	tb, errB := parseStamp(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return ta.After(tb)
 }
 
 // windowDays floors the span between two timestamps to whole days.
