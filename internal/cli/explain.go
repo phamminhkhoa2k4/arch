@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -41,24 +40,10 @@ func runExplain(ctx context.Context, w io.Writer, dbPath, ref string) error {
 	if err != nil {
 		return err
 	}
-	entities, err := st.FindEntities(ctx, scanID, ref)
+	ent, err := resolveComponent(ctx, st, scanID, ref)
 	if err != nil {
 		return err
 	}
-	switch len(entities) {
-	case 0:
-		return fmt.Errorf("không tìm thấy component nào khớp %q trong scan #%d", ref, scanID)
-	case 1:
-	default:
-		var b strings.Builder
-		fmt.Fprintf(&b, "tham chiếu %q khớp %d entity — dùng identity_key:", ref, len(entities))
-		for _, e := range entities {
-			fmt.Fprintf(&b, "\n  %s", e.IdentityKey)
-		}
-		return errors.New(b.String())
-	}
-
-	ent := entities[0]
 	evid, err := st.EvidenceFor(ctx, ent.ID)
 	if err != nil {
 		return err

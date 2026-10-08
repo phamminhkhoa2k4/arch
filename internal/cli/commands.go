@@ -6,8 +6,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// stub marks commands that are only registered for now — their behavior
-// lands in a later epic; each subcommand fills in its logic when built.
+// stub marks commands that are only registered for now — each
+// subcommand fills in its logic when built.
 func stub() func(*cobra.Command, []string) {
 	return func(c *cobra.Command, _ []string) {
 		_, _ = fmt.Fprintf(c.OutOrStdout(),
@@ -23,13 +23,8 @@ func addCommands(root *cobra.Command) {
 			Short: "Sample network activity to measure real usage over time",
 			Run:   stub(),
 		},
-		&cobra.Command{
-			Use:   "delete-check <component>",
-			Short: "Issue an evidence-backed verdict for one component",
-			Args:  cobra.ExactArgs(1),
-			Run:   stub(),
-		},
 		newExplainCmd(),
+		newDeleteCheckCmd(),
 		&cobra.Command{
 			Use:   "plan <component>",
 			Short: "Generate a staged cleanup plan with rollback commands",
