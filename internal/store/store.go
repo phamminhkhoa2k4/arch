@@ -23,7 +23,10 @@ type Store struct {
 
 // Open opens (or creates) the SQLite database at path and runs migrations.
 func Open(ctx context.Context, path string) (*Store, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", path)
+	// WAL lets a concurrent scan writer and the observe daemon write
+	// without the ping-pong that starved busy_timeout in journal mode
+	// DELETE; the timeout covers the residual writer-writer overlap.
+	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)

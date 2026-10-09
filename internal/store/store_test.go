@@ -50,6 +50,20 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 }
 
+// Concurrent scan and daemon writers rely on WAL: without it the
+// observe loop starves the busy timeout while a scan is flushing.
+func TestOpenEnablesWAL(t *testing.T) {
+	s := openTemp(t)
+	var mode string
+	if err := s.DB().QueryRowContext(context.Background(),
+		`PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatalf("journal_mode: %v", err)
+	}
+	if mode != "wal" {
+		t.Errorf("journal_mode = %q, want wal", mode)
+	}
+}
+
 // Positive: a valid evidence row with polarity and raw_ref inserts.
 func TestEvidenceValidRowAccepted(t *testing.T) {
 	s := openTemp(t)
