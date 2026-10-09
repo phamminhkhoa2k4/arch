@@ -112,12 +112,70 @@ func TestObserveLoopRejectsBadInterval(t *testing.T) {
 	}
 }
 
-func TestObserveLoopPropagatesSampleError(t *testing.T) {
+// A failing sample costs one round, not the daemon: the loop keeps
+// ticking and surfaces the error on its output instead of exiting.
+func TestObserveLoopSurvivesSampleError(t *testing.T) {
 	f := &fakeObserver{err: errors.New("proc hỏng")}
-	err := observeLoop(context.Background(), &bufNull{}, f, time.Millisecond, false,
-		func() error { return nil })
-	if err == nil || !strings.Contains(err.Error(), "proc hỏng") {
-		t.Fatalf("err = %v, want sample failure", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var buf bytes.Buffer
+	var loads atomic.Int64
+	done := make(chan error, 1)
+	go func() {
+		done <- observeLoop(ctx, &buf, f, time.Millisecond, false,
+			func() error {
+				if loads.Add(1) >= 3 {
+					cancel()
+				}
+				return nil
+			})
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("observeLoop must survive sample errors, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("loop did not survive sample errors")
+	}
+	if !strings.Contains(buf.String(), "Error: lấy mẫu") {
+		t.Errorf("output missing sample error line: %q", buf.String())
+	}
+	if loads.Load() < 3 {
+		t.Errorf("load called %d times, want ≥3", loads.Load())
+	}
+}
+
+// A transient listener-load failure mid-run is logged and retried on
+// the next tick (a concurrent scan may hold the database).
+func TestObserveLoopSurvivesLoadError(t *testing.T) {
+	f := &fakeObserver{ch: make(chan struct{}, 8)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var buf bytes.Buffer
+	var loads atomic.Int64
+	done := make(chan error, 1)
+	go func() {
+		done <- observeLoop(ctx, &buf, f, time.Millisecond, false,
+			func() error {
+				n := loads.Add(1)
+				if n == 2 || n == 3 { // initial load succeeds; next two rounds fail
+					return errors.New("database is locked")
+				}
+				return nil
+			})
+	}()
+	select {
+	case <-f.ch: // reached only after a successful load
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for a sample after load errors")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("observeLoop must survive load errors, got %v", err)
+	}
+	if !strings.Contains(buf.String(), "Error: tải listener") {
+		t.Errorf("output missing load error line: %q", buf.String())
 	}
 }
 

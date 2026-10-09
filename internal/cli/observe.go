@@ -151,12 +151,17 @@ func observeLoop(ctx context.Context, w io.Writer, s observer, interval time.Dur
 			return nil
 		case <-ticker.C:
 			rounds++
+			// A transient failure (a concurrent scan holding the
+			// database lock, a reader error) must cost one round,
+			// never the whole daemon: log and try again next tick.
 			if err := load(); err != nil {
-				return fmt.Errorf("tải listener: %w", err)
+				_, _ = fmt.Fprintf(w, "Error: tải listener: %v\n", err)
+				continue
 			}
 			n, err := s.SampleOnce(ctx)
 			if err != nil {
-				return fmt.Errorf("lấy mẫu: %w", err)
+				_, _ = fmt.Fprintf(w, "Error: lấy mẫu: %v\n", err)
+				continue
 			}
 			if !daemon {
 				_, _ = fmt.Fprintf(w, "lần mẫu %d: %d cặp\n", rounds, n)
