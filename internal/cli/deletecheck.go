@@ -24,17 +24,22 @@ func newDeleteCheckCmd() *cobra.Command {
 		Short: "Issue an evidence-backed verdict for one component",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeleteCheck(cmd.Context(), cmd.OutOrStdout(), dbPath, rulesPath, args[0])
+			format, _ := cmd.Flags().GetString("format")
+			return runDeleteCheck(cmd.Context(), cmd.OutOrStdout(), dbPath, rulesPath, args[0], format)
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
 		"path to the SQLite evidence database")
 	cmd.Flags().StringVar(&rulesPath, "rules-file", "",
 		"path to a rules.yaml override (default: embedded rules)")
+	addFormatFlag(cmd)
 	return cmd
 }
 
-func runDeleteCheck(ctx context.Context, w io.Writer, dbPath, rulesPath, ref string) error {
+func runDeleteCheck(ctx context.Context, w io.Writer, dbPath, rulesPath, ref, format string) error {
+	if err := validateFormat(format); err != nil {
+		return err
+	}
 	st, err := store.Open(ctx, dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
@@ -65,7 +70,80 @@ func runDeleteCheck(ctx context.Context, w io.Writer, dbPath, rulesPath, ref str
 	if err := st.SaveVerdict(ctx, ent.ID, scanID, res, hash); err != nil {
 		return err
 	}
-	return printDeleteCheck(w, res)
+	code := deleteCheckExitCode(ctx, st, scanID, ent.ID, res)
+	if format == formatJSON {
+		out := deleteCheckJSON{
+			Result:   normalizeResult(res),
+			ScanID:   scanID,
+			Ref:      ref,
+			Identity: ent.IdentityKey,
+			Kind:     ent.Kind,
+			Name:     ent.Name,
+			ExitCode: code,
+		}
+		if err := writeJSON(w, out); err != nil {
+			return err
+		}
+	} else if err := printDeleteCheck(w, res); err != nil {
+		return err
+	}
+	if code != ExitOK {
+		return attention(fmt.Errorf("verdict %s cần chú ý", res.State))
+	}
+	return nil
+}
+
+// deleteCheckExitCode maps the verdict (plus BROKEN_ROUTE findings)
+// to the automation exit code.
+func deleteCheckExitCode(ctx context.Context, st *store.Store, scanID, entityID int64, res verdict.Result) int {
+	switch res.State {
+	case verdict.StateActive:
+		broken, err := st.HasBrokenRoute(ctx, scanID, entityID)
+		if err == nil && broken {
+			return ExitAttention
+		}
+		return ExitOK
+	case verdict.StateLikelyOrphaned, verdict.StateOrphaned, verdict.StateUnknown:
+		return ExitAttention
+	default:
+		return ExitAttention
+	}
+}
+
+// deleteCheckJSON is the --format json shape for delete-check.
+type deleteCheckJSON struct {
+	verdict.Result
+	ScanID   int64  `json:"scan_id"`
+	Ref      string `json:"ref"`
+	Identity string `json:"identity"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	ExitCode int    `json:"exit_code"`
+}
+
+// normalizeResult replaces nil slices with empty ones so the JSON
+// shape is always an array (never null), matching the published
+// schema.
+func normalizeResult(res verdict.Result) verdict.Result {
+	if res.Blockers == nil {
+		res.Blockers = []verdict.Item{}
+	}
+	if res.Signals == nil {
+		res.Signals = []verdict.Item{}
+	}
+	if res.Blinds == nil {
+		res.Blinds = []verdict.Blind{}
+	}
+	if res.Applicable == nil {
+		res.Applicable = []string{}
+	}
+	if res.Missing == nil {
+		res.Missing = []string{}
+	}
+	if res.Reasons == nil {
+		res.Reasons = []string{}
+	}
+	return res
 }
 
 // resolveComponent mirrors explain's resolution: one exact hit or a

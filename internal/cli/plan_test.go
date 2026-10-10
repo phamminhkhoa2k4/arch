@@ -92,13 +92,17 @@ func TestPlanGenerateOrphaned(t *testing.T) {
 	}
 }
 
-// An ACTIVE component is refused with blocker-based guidance.
+// An ACTIVE component is refused with blocker-based guidance and the
+// attention exit code.
 func TestPlanRefuseActive(t *testing.T) {
 	db := copyFixtureDB(t)
 	var buf strings.Builder
 	err := runPlanRoot(t, db, &buf, "lab-web", "--db", db, "--out", t.TempDir())
-	if err != nil {
-		t.Fatalf("active refusal must not error: %v", err)
+	if err == nil {
+		t.Fatal("active refusal must return the attention error")
+	}
+	if got := exitCodeOf(err); got != ExitAttention {
+		t.Errorf("exit code = %d, want %d", got, ExitAttention)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "KHÔNG sinh kế hoạch") || !strings.Contains(out, "ACTIVE") {

@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist explain --format json",
+  "type": "object",
+  "required": [
+    "scan_id", "kind", "name", "identity", "attributes",
+    "evidence", "neighbors", "blind_spots"
+  ],
+  "properties": {
+    "scan_id": { "type": "integer" },
+    "kind": { "type": "string" },
+    "name": { "type": "string" },
+    "identity": { "type": "string" },
+    "attributes": { "type": "object" },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "polarity", "channel", "strength", "observed_at", "raw_ref"],
+        "properties": {
+          "id": { "type": "integer" },
+          "polarity": { "type": "string" },
+          "channel": { "type": "string" },
+          "strength": { "type": "string" },
+          "observed_at": { "type": "string" },
+          "raw_ref": { "type": "string" },
+          "value": { "type": "object" }
+        }
+      }
+    },
+    "neighbors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["edge_kind", "strength", "neighbor_kind", "neighbor_name"],
+        "properties": {
+          "edge_kind": { "type": "string" },
+          "strength": { "type": "string" },
+          "neighbor_kind": { "type": "string" },
+          "neighbor_name": { "type": "string" },
+          "channel": { "type": "string" },
+          "raw_ref": { "type": "string" }
+        }
+      }
+    },
+    "blind_spots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["channel", "reason"],
+        "properties": {
+          "channel": { "type": "string" },
+          "reason": { "type": "string" },
+          "detail": { "type": "object" }
+        }
+      }
+    }
+  }
+}

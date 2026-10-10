@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist delete-check --format json",
+  "type": "object",
+  "required": [
+    "state", "coverage", "blockers", "signals", "blinds", "window",
+    "window_ok", "applicable", "missing", "reasons", "action",
+    "scan_id", "ref", "identity", "kind", "name", "exit_code"
+  ],
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": ["ACTIVE", "LIKELY_ORPHANED", "ORPHANED", "UNKNOWN"]
+    },
+    "coverage": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "text"],
+        "properties": {
+          "code": { "type": "string" },
+          "text": { "type": "string" },
+          "evidence_id": { "type": "integer" },
+          "raw_ref": { "type": "string" }
+        }
+      }
+    },
+    "signals": { "type": "array", "items": { "type": "object" } },
+    "blinds": { "type": "array", "items": { "type": "object" } },
+    "window": {
+      "type": "object",
+      "required": ["start", "end", "days", "source"],
+      "properties": {
+        "start": { "type": "string" },
+        "end": { "type": "string" },
+        "days": { "type": "integer" },
+        "source": { "type": "string" }
+      }
+    },
+    "window_ok": { "type": "boolean" },
+    "applicable": { "type": "array", "items": { "type": "string" } },
+    "missing": { "type": "array", "items": { "type": "string" } },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "action": { "type": "string" },
+    "scan_id": { "type": "integer" },
+    "ref": { "type": "string" },
+    "identity": { "type": "string" },
+    "kind": { "type": "string" },
+    "name": { "type": "string" },
+    "exit_code": { "type": "integer", "enum": [0, 1] }
+  }
+}

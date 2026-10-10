@@ -212,8 +212,8 @@ coverage:
 `)
 
 	out, err := runExplainCmd(t, "delete-check", "legacy-api", "--db", db, "--rules-file", rulesPath)
-	if err != nil {
-		t.Fatalf("delete-check: %v", err)
+	if err == nil || exitCodeOf(err) != ExitAttention {
+		t.Fatalf("delete-check ORPHANED err = %v, want attention exit", err)
 	}
 	requireSectionOrder(t, out,
 		"Trạng thái:", "Cửa sổ quan sát:", "Evidence coverage:",
@@ -279,16 +279,16 @@ coverage:
 `)
 
 	outA, err := runExplainCmd(t, "delete-check", "legacy-api", "--db", db, "--rules-file", rulesA)
-	if err != nil {
-		t.Fatalf("delete-check A: %v", err)
+	if err == nil || exitCodeOf(err) != ExitAttention {
+		t.Fatalf("delete-check A err = %v, want attention exit", err)
 	}
 	if !strings.Contains(outA, "Trạng thái: ORPHANED") {
 		t.Errorf("rules A must yield ORPHANED:\n%s", outA)
 	}
 
 	outB, err := runExplainCmd(t, "delete-check", "legacy-api", "--db", db, "--rules-file", rulesB)
-	if err != nil {
-		t.Fatalf("delete-check B: %v", err)
+	if err == nil || exitCodeOf(err) != ExitAttention {
+		t.Fatalf("delete-check B err = %v, want attention exit", err)
 	}
 	for _, want := range []string{"Trạng thái: UNKNOWN", "Evidence coverage: LOW", "thiếu: docker_log"} {
 		if !strings.Contains(outB, want) {

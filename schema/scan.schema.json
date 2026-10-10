@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist scan --format json",
+  "type": "object",
+  "required": [
+    "scan_id", "host", "status", "entities_by_kind",
+    "blind_spots", "findings", "failed_collectors", "verdict"
+  ],
+  "properties": {
+    "scan_id": { "type": "integer" },
+    "host": { "type": "string" },
+    "status": { "type": "string", "enum": ["ok", "partial", "failed"] },
+    "entities_by_kind": {
+      "type": "object",
+      "additionalProperties": { "type": "integer" }
+    },
+    "blind_spots": { "type": "integer" },
+    "findings": { "type": "integer" },
+    "failed_collectors": { "type": "array", "items": { "type": "string" } },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": { "type": "integer" },
+      "properties": {
+        "ACTIVE": { "type": "integer" },
+        "UNKNOWN": { "type": "integer" },
+        "LIKELY_ORPHANED": { "type": "integer" },
+        "ORPHANED": { "type": "integer" }
+      }
+    }
+  }
+}

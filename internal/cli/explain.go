@@ -21,15 +21,20 @@ func newExplainCmd() *cobra.Command {
 		Short: "Show dependencies, evidence, and blind spots for a component",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExplain(cmd.Context(), cmd.OutOrStdout(), dbPath, args[0])
+			format, _ := cmd.Flags().GetString("format")
+			return runExplain(cmd.Context(), cmd.OutOrStdout(), dbPath, args[0], format)
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
 		"path to the SQLite evidence database")
+	addFormatFlag(cmd)
 	return cmd
 }
 
-func runExplain(ctx context.Context, w io.Writer, dbPath, ref string) error {
+func runExplain(ctx context.Context, w io.Writer, dbPath, ref, format string) error {
+	if err := validateFormat(format); err != nil {
+		return err
+	}
 	st, err := store.Open(ctx, dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
@@ -56,7 +61,68 @@ func runExplain(ctx context.Context, w io.Writer, dbPath, ref string) error {
 	if err != nil {
 		return err
 	}
+	if format == formatJSON {
+		return writeJSON(w, explainJSON(scanID, ent, evid, neighbors, blinds))
+	}
 	return printExplain(w, scanID, ent, evid, neighbors, blinds)
+}
+
+// explainJSON is the --format json shape for explain.
+func explainJSON(scanID int64, ent store.EntityRow, evid []store.EvidenceRow,
+	neighbors []store.NeighborRow, blinds []store.BlindRow,
+) map[string]any {
+	type evidenceJSON struct {
+		ID         int64             `json:"id"`
+		Polarity   string            `json:"polarity"`
+		Channel    string            `json:"channel"`
+		Strength   string            `json:"strength"`
+		ObservedAt string            `json:"observed_at"`
+		RawRef     string            `json:"raw_ref"`
+		Value      map[string]string `json:"value"`
+	}
+	type neighborJSON struct {
+		EdgeKind     string `json:"edge_kind"`
+		Strength     string `json:"strength"`
+		NeighborKind string `json:"neighbor_kind"`
+		NeighborName string `json:"neighbor_name"`
+		Channel      string `json:"channel"`
+		RawRef       string `json:"raw_ref"`
+	}
+	type blindJSON struct {
+		Channel string            `json:"channel"`
+		Reason  string            `json:"reason"`
+		Detail  map[string]string `json:"detail"`
+	}
+	ev := make([]evidenceJSON, 0, len(evid))
+	for _, e := range evid {
+		ev = append(ev, evidenceJSON{
+			ID: e.ID, Polarity: e.Polarity, Channel: e.Channel,
+			Strength: e.Strength, ObservedAt: e.ObservedAt,
+			RawRef: e.RawRef, Value: e.Value,
+		})
+	}
+	nb := make([]neighborJSON, 0, len(neighbors))
+	for _, n := range neighbors {
+		nb = append(nb, neighborJSON{
+			EdgeKind: n.EdgeKind, Strength: n.Strength,
+			NeighborKind: n.NeighborKind, NeighborName: n.NeighborName,
+			Channel: n.Channel, RawRef: n.RawRef,
+		})
+	}
+	bl := make([]blindJSON, 0, len(blinds))
+	for _, b := range blinds {
+		bl = append(bl, blindJSON{Channel: b.Channel, Reason: b.Reason, Detail: b.Detail})
+	}
+	return map[string]any{
+		"scan_id":     scanID,
+		"kind":        ent.Kind,
+		"name":        ent.Name,
+		"identity":    ent.IdentityKey,
+		"attributes":  ent.Attributes,
+		"evidence":    ev,
+		"neighbors":   nb,
+		"blind_spots": bl,
+	}
 }
 
 func printExplain(

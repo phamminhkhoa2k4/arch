@@ -81,7 +81,10 @@ func runPlanGenerate(ctx context.Context, w io.Writer, ref, dbPath, rulesPath, o
 	}
 	defer func() { _ = st.Close() }()
 	if !planEligible(res.State) {
-		return printPlanRefusal(w, res)
+		if err := printPlanRefusal(w, res); err != nil {
+			return err
+		}
+		return attention(fmt.Errorf("verdict %s không đủ điều kiện để sinh kế hoạch", res.State))
 	}
 	planID, err := st.EnsurePlan(ctx, ent.ID)
 	if err != nil {
