@@ -86,11 +86,16 @@ while IFS=$'\t' read -r id expected ref must_not; do
     FAIL=1
     continue
   fi
-  out="$("$BIN" delete-check "$ref" --db "$DB" --rules-file "$RULES" 2>&1)" || {
+  # Exit 0 (ACTIVE) and 1 (attention: orphan/unknown) are both valid
+  # verdict outcomes; only >=2 is a hard execution error.
+  out=""
+  rc=0
+  out="$("$BIN" delete-check "$ref" --db "$DB" --rules-file "$RULES" 2>&1)" || rc=$?
+  if [ "$rc" -ge 2 ]; then
     printf 'FAIL  %-24s delete-check error: %s\n' "$id" "$(printf '%s' "$out" | head -1)"
     FAIL=1
     continue
-  }
+  fi
   got="$(printf '%s\n' "$out" | sed -n 's/^Trạng thái: //p' | head -1)"
   if [ -z "$got" ]; then
     printf 'FAIL  %-24s no verdict line\n' "$id"
