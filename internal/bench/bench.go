@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"archaeologist/internal/rules"
 	"archaeologist/internal/store"
 )
 
@@ -41,20 +44,65 @@ type Report struct {
 	BrokenRoutes []string // ground-truth chain ids that failed
 }
 
-// Run loads the ground truth and the scan database, computes both
-// metrics, and writes the human-readable report to out. A metric below
-// threshold adds a GitHub Actions warning annotation but still returns
-// nil (exit 0); invalid inputs return an error (exit ≠0).
-func Run(dbPath, gtPath string, out io.Writer) error {
+// Run loads the ground truth and the scan database, computes the
+// correlation metrics plus the checkpoint metrics, and writes the
+// human-readable report to out. Correlation misses add GitHub Actions
+// warning annotations and still return nil (exit 0); a checkpoint
+// miss returns an error so the CI job fails (D3). The database is
+// copied to a temp file first: the store flips the WAL header and the
+// verdict cache writes rows — neither may dirty the committed fixture.
+func Run(dbPath, gtPath, rulesPath string, out io.Writer) error {
 	gt, err := LoadGT(gtPath)
 	if err != nil {
 		return fmt.Errorf("ground truth: %w", err)
 	}
-	rep, err := Measure(dbPath, gt)
+	working, cleanup, err := copyDB(dbPath)
 	if err != nil {
 		return err
 	}
-	return rep.Write(out)
+	defer cleanup()
+
+	rep, err := Measure(working, gt)
+	if err != nil {
+		return err
+	}
+	r, _, err := rules.Load(rulesPath)
+	if err != nil {
+		return fmt.Errorf("rules: %w", err)
+	}
+	cp, err := MeasureCheckpoint(working, gt, r)
+	if err != nil {
+		return err
+	}
+	if err := rep.Write(out); err != nil {
+		return err
+	}
+	if err := cp.Write(out); err != nil {
+		return err
+	}
+	if cp.GateFailed() {
+		return fmt.Errorf("checkpoint #2: false-orphan hoặc precision LIKELY_ORPHANED dưới ngưỡng")
+	}
+	return nil
+}
+
+// copyDB copies the database file into a fresh temp directory and
+// returns the copy plus a cleanup that removes it.
+func copyDB(src string) (string, func(), error) {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("read db: %w", err)
+	}
+	dir, err := os.MkdirTemp("", "bench-db-")
+	if err != nil {
+		return "", func() {}, err
+	}
+	dst := filepath.Join(dir, "scan.db")
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", func() {}, fmt.Errorf("copy db: %w", err)
+	}
+	return dst, func() { _ = os.RemoveAll(dir) }, nil
 }
 
 // Measure evaluates both metrics. dbPath errors and missing scans are

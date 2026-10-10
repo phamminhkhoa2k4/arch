@@ -50,10 +50,25 @@ type GTRouteChain struct {
 	Reason   string          `yaml:"reason"`
 }
 
+// GTComponent is one ground-truth verdict expectation: the real state
+// plus the ref (name or identity key) FindEntities uses to resolve it.
+type GTComponent struct {
+	ID             string   `yaml:"id"`
+	Kind           string   `yaml:"kind"`
+	Name           string   `yaml:"name"`
+	Ref            string   `yaml:"ref"`
+	Expected       string   `yaml:"expected"`
+	MustNotVerdict []string `yaml:"must_not_verdict"`
+	Trap           string   `yaml:"trap"`
+	Reason         string   `yaml:"reason"`
+}
+
 // GroundTruth is the benchmark slice of the ground-truth yaml file.
 type GroundTruth struct {
 	Listeners   []GTListener   `yaml:"listeners"`
 	RouteChains []GTRouteChain `yaml:"route_chains"`
+	Components  []GTComponent  `yaml:"components"`
+	Traps       []string       `yaml:"traps"`
 }
 
 // findListener returns the ground-truth entry matching proto/addr/port,
@@ -85,6 +100,17 @@ func LoadGT(path string) (*GroundTruth, error) {
 	}
 	if len(gt.RouteChains) == 0 {
 		return nil, fmt.Errorf("%s: missing non-empty route_chains block", path)
+	}
+	if len(gt.Components) == 0 {
+		return nil, fmt.Errorf("%s: missing non-empty components block", path)
+	}
+	for _, c := range gt.Components {
+		if c.Ref == "" {
+			return nil, fmt.Errorf("%s: component %s has no ref", path, c.ID)
+		}
+		if c.Expected == "" {
+			return nil, fmt.Errorf("%s: component %s has no expected state", path, c.ID)
+		}
 	}
 	return &gt, nil
 }

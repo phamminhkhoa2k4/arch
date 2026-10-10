@@ -210,7 +210,7 @@ func TestBenchToolErrorBadGT(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	err := Run(db, broken, &bytes.Buffer{})
+	err := Run(db, broken, "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("Run with empty-benchmark GT must fail")
 	}
@@ -241,11 +241,16 @@ route_chains:
     file: lab.conf
     simple: true
     expected: [{proto: tcp, port: 8081, owner: {kind: container, name: lab-web}}]
+components:
+  - id: container-lab-web
+    kind: container
+    ref: lab-web
+    expected: ACTIVE
 `
 	if err := os.WriteFile(gtPath, []byte(gtYAML), 0o644); err != nil {
 		t.Fatalf("write gt: %v", err)
 	}
-	err = Run(empty, gtPath, &bytes.Buffer{})
+	err = Run(empty, gtPath, "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("db without scans must fail")
 	}
@@ -279,6 +284,21 @@ route_chains:
           kind: container
           name: lab-web
     reason: "route tĩnh"
+components:
+  - id: container-lab-web
+    kind: container
+    name: lab-web
+    ref: lab-web
+    expected: ACTIVE
+  - id: cron-monthly
+    kind: cron_job
+    name: monthly
+    ref: 'cron_job|/etc/cron.d/lab-monthly#root#/opt/lab/scripts/monthly-report.sh'
+    expected: ACTIVE
+    must_not_verdict: [LIKELY_ORPHANED, ORPHANED]
+    trap: monthly_cron
+traps:
+  - monthly_cron
 `
 	if err := os.WriteFile(gtPath, []byte(gtYAML), 0o644); err != nil {
 		t.Fatalf("write gt: %v", err)
@@ -292,6 +312,15 @@ route_chains:
 	}
 	if len(gt.RouteChains) != 1 || !gt.RouteChains[0].Simple {
 		t.Errorf("route_chains = %+v", gt.RouteChains)
+	}
+	if len(gt.Components) != 2 || gt.Components[1].Trap != "monthly_cron" {
+		t.Errorf("components = %+v", gt.Components)
+	}
+	if !strings.Contains(gt.Components[1].Ref, "lab-monthly") {
+		t.Errorf("component ref not parsed: %+v", gt.Components[1])
+	}
+	if len(gt.Traps) != 1 || gt.Traps[0] != "monthly_cron" {
+		t.Errorf("traps = %+v", gt.Traps)
 	}
 	if got := gt.findListener("tcp", "0.0.0.0", "8081"); got == nil || got.ID != "listener-web-8081" {
 		t.Errorf("findListener = %+v", got)
