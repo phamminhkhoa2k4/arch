@@ -28,12 +28,14 @@ traps:
 components:
   # ---------- Docker containers (6) ----------
   - id: container-lab-web
+    ref: 'lab-web'
     kind: container
     name: lab-web
     expected: ACTIVE
     reason: "nginx route /web/ proxy_pass tĩnh tới 127.0.0.1:8081 (deterministic)"
 
   - id: container-lab-api
+    ref: 'lab-api'
     kind: container
     name: lab-api
     expected: ACTIVE
@@ -41,24 +43,28 @@ components:
     trap: nginx_variable
 
   - id: container-lab-cache
+    ref: 'lab-cache'
     kind: container
     name: lab-cache
     expected: ACTIVE
     reason: "backup.sh (cron daily 02:30) gọi redis-cli 127.0.0.1:6379"
 
   - id: container-lab-helper
+    ref: 'lab-helper'
     kind: container
     name: lab-helper
     expected: ACTIVE
     reason: "compose depends_on của lab-web"
 
   - id: container-lab-worker
+    ref: 'lab-worker'
     kind: container
     name: lab-worker
     expected: ORPHANED
     reason: "không route, không cron, không depends_on, không observations"
 
   - id: container-lab-old-app
+    ref: 'lab-old-app'
     kind: container
     name: lab-old-app
     expected: ORPHANED
@@ -66,12 +72,14 @@ components:
 
   # ---------- systemd units (4) ----------
   - id: unit-lab-app
+    ref: 'lab-app.service'
     kind: systemd_unit
     name: lab-app.service
     expected: ACTIVE
     reason: "monitor.sh (root crontab, mỗi 5 phút) curl 127.0.0.1:9099"
 
   - id: unit-lab-external-api
+    ref: 'lab-external-api.service'
     kind: systemd_unit
     name: lab-external-api.service
     expected: ACTIVE
@@ -81,12 +89,14 @@ components:
     must_not_verdict_note: "khi observation window chưa đủ (mặc định 14 ngày), verdict phải là UNKNOWN chứ không bao giờ orphan"
 
   - id: unit-lab-batch
+    ref: 'lab-batch.service'
     kind: systemd_unit
     name: lab-batch.service
     expected: ACTIVE
     reason: "backup.sh (cron daily) chạy systemctl start lab-batch.service"
 
   - id: unit-lab-legacy
+    ref: 'lab-legacy.service'
     kind: systemd_unit
     name: lab-legacy.service
     expected: ORPHANED
@@ -94,18 +104,21 @@ components:
 
   # ---------- Cron jobs (6) ----------
   - id: cron-heartbeat
+    ref: 'cron_job|/etc/crontab#root#/opt/lab/scripts/heartbeat.sh'
     kind: cron_job
     name: "heartbeat ( /etc/crontab :17 hourly )"
     expected: ACTIVE
     reason: "ghi /var/log/lab-heartbeat.log — có log activity"
 
   - id: cron-backup
+    ref: 'cron_job|/etc/cron.d/lab-backup#root#/opt/lab/scripts/backup.sh'
     kind: cron_job
     name: "lab-backup (/etc/cron.d, 02:30 daily)"
     expected: ACTIVE
     reason: "gọi backup.sh tham chiếu lab-cache + lab-batch"
 
   - id: cron-monthly
+    ref: 'cron_job|/etc/cron.d/lab-monthly#root#/opt/lab/scripts/monthly-report.sh'
     kind: cron_job
     name: "lab-monthly (/etc/cron.d, 0 0 1 * *)"
     expected: ACTIVE
@@ -115,18 +128,21 @@ components:
     must_not_verdict_note: "cửa sổ quan sát 14 ngày không bao phủ chu kỳ 30 ngày; mục tiêu của nó bị cron này che chắn cũng không được orphan trong khi chưa đủ cửa sổ"
 
   - id: cron-monitor
+    ref: 'cron_job|/var/spool/cron/crontabs/root#root#/opt/lab/scripts/monitor.sh'
     kind: cron_job
     name: "monitor (root crontab, */5)"
     expected: ACTIVE
     reason: "monitor.sh curl 127.0.0.1:9099 mỗi 5 phút"
 
   - id: cron-rotate-logs
+    ref: 'cron_job|/var/spool/cron/crontabs/root#root#/opt/lab/scripts/rotate-logs-gone.sh'
     kind: cron_job
     name: "rotate-logs-gone (root crontab, 06:00 Sunday)"
     expected: ORPHANED
     reason: "lịch weekly vẫn parse; script /opt/lab/scripts/rotate-logs-gone.sh không tồn tại → ORPHAN_CRON"
 
   - id: cron-boot
+    ref: 'cron_job|/etc/cron.d/lab-boot#root#/opt/lab/scripts/boot.sh'
     kind: cron_job
     name: "lab-boot (/etc/cron.d, @reboot)"
     expected: ACTIVE
@@ -134,6 +150,7 @@ components:
 
   # ---------- systemd timer (1) ----------
   - id: timer-lab-watchdog
+    ref: 'timer|lab-watchdog.timer'
     kind: timer
     name: lab-watchdog.timer
     expected: ACTIVE
@@ -141,12 +158,14 @@ components:
 
   # ---------- nginx routes (5) + upstream (1) ----------
   - id: route-web
+    ref: '/web/'
     kind: nginx_route
     name: "/web/ (port 8080)"
     expected: ACTIVE
     reason: "proxy_pass http://127.0.0.1:8081/ tĩnh → listener của lab-web, deterministic; up.sh curl /web/ → evidence nginx_access_log/last_request_at"
 
   - id: route-var
+    ref: '/var/'
     kind: nginx_route
     name: "/var/ (port 8080)"
     expected: UNKNOWN
@@ -154,24 +173,28 @@ components:
     trap: nginx_variable
 
   - id: route-dead
+    ref: '/dead/'
     kind: nginx_route
     name: "/dead/ (port 8080)"
     expected: BROKEN
     reason: "proxy_pass http://127.0.0.1:9999/ cố tình trỏ port không ai nghe — ground-truth case BROKEN_ROUTE, scan phải finding đúng mỗi route này"
 
   - id: route-pool
+    ref: '/pool/'
     kind: nginx_route
     name: "/pool/ (port 8080)"
     expected: ACTIVE
     reason: "proxy_pass http://lab_pool/ → upstream; mỗi member (8081 lab-web, 8082 lab-api) có cạnh proxies_to listener; up.sh curl /pool/ → evidence nginx_access_log/last_request_at"
 
   - id: route-ext
+    ref: '/ext/'
     kind: nginx_route
     name: "/ext/ (port 8080)"
     expected: EXTERNAL
     reason: "proxy_pass https://example.com/ ngoài host — attrs upstream_scope=external, không cạnh, không blind spot"
 
   - id: upstream-pool
+    ref: 'lab_pool'
     kind: nginx_upstream
     name: "lab_pool"
     expected: ACTIVE

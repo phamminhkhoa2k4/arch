@@ -49,37 +49,9 @@ if [ -z "$BIN" ]; then
   (cd "$ROOT_DIR" && go build -o "$BIN" ./cmd/archaeologist)
 fi
 
-# GT id → identity_key/name understood by FindEntities. Cron and timer
-# entities need identity keys (their names collide with script/systemd
-# twins in the same scan); everything else resolves by name.
-ref_for() {
-  case "$1" in
-    cron-heartbeat)     echo 'cron_job|/etc/crontab#root#/opt/lab/scripts/heartbeat.sh' ;;
-    cron-backup)        echo 'cron_job|/etc/cron.d/lab-backup#root#/opt/lab/scripts/backup.sh' ;;
-    cron-monthly)       echo 'cron_job|/etc/cron.d/lab-monthly#root#/opt/lab/scripts/monthly-report.sh' ;;
-    cron-monitor)       echo 'cron_job|/var/spool/cron/crontabs/root#root#/opt/lab/scripts/monitor.sh' ;;
-    cron-rotate-logs)   echo 'cron_job|/var/spool/cron/crontabs/root#root#/opt/lab/scripts/rotate-logs-gone.sh' ;;
-    cron-boot)          echo 'cron_job|/etc/cron.d/lab-boot#root#/opt/lab/scripts/boot.sh' ;;
-    timer-lab-watchdog) echo 'timer|lab-watchdog.timer' ;;
-    route-web)    echo '/web/' ;;
-    route-var)    echo '/var/' ;;
-    route-dead)   echo '/dead/' ;;
-    route-pool)   echo '/pool/' ;;
-    route-ext)    echo '/ext/' ;;
-    upstream-pool) echo 'lab_pool' ;;
-    container-lab-web)      echo 'lab-web' ;;
-    container-lab-api)      echo 'lab-api' ;;
-    container-lab-cache)    echo 'lab-cache' ;;
-    container-lab-helper)   echo 'lab-helper' ;;
-    container-lab-worker)   echo 'lab-worker' ;;
-    container-lab-old-app)  echo 'lab-old-app' ;;
-    unit-lab-app)           echo 'lab-app.service' ;;
-    unit-lab-external-api)  echo 'lab-external-api.service' ;;
-    unit-lab-batch)         echo 'lab-batch.service' ;;
-    unit-lab-legacy)        echo 'lab-legacy.service' ;;
-    *) return 1 ;;
-  esac
-}
+# GT id → identity_key/name understood by FindEntities comes from the
+# component's ref field in ground-truth.yaml (single source shared
+# with the checkpoint benchmark); the awk below extracts it.
 
 # verdict_allowed <expected> <must_not_csv> <got> — decision D3.
 verdict_allowed() {
@@ -106,11 +78,11 @@ echo
 
 FAIL=0
 COUNT=0
-while IFS=$'\t' read -r id expected must_not; do
+while IFS=$'\t' read -r id expected ref must_not; do
   [ -n "$id" ] || continue
   COUNT=$((COUNT + 1))
-  if ! ref="$(ref_for "$id")"; then
-    printf 'FAIL  %-24s no ref mapping for GT id\n' "$id"
+  if [ -z "$ref" ]; then
+    printf 'FAIL  %-24s no ref field in ground truth\n' "$id"
     FAIL=1
     continue
   fi
@@ -138,18 +110,23 @@ done < <(awk '
   /^components:/ { f = 1; next }
   f && /^[A-Za-z_]+:/ { f = 0 }
   f && /^  - id:/ {
-    if (id != "") print id "\t" expd "\t" mnt
-    id = $3; expd = ""; mnt = ""
+    if (id != "") print id "\t" expd "\t" ref "\t" mnt
+    id = $3; expd = ""; mnt = ""; ref = ""
     next
   }
   f && /^    expected:/ { expd = $2 }
+  f && /^    ref:/ {
+    ref = $0
+    sub(/^    ref: /, "", ref)
+    gsub(/\047/, "", ref)
+  }
   f && /^    must_not_verdict:/ {
     line = $0
     sub(/^.*\[/, "", line); sub(/\].*$/, "", line)
     gsub(/ /, "", line)
     mnt = line
   }
-  END { if (id != "") print id "\t" expd "\t" mnt }
+  END { if (id != "") print id "\t" expd "\t" ref "\t" mnt }
 ' "$GT")
 
 if [ "$COUNT" -eq 0 ]; then
