@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -23,8 +24,10 @@ import (
 	dengine "archaeologist/internal/docker"
 	"archaeologist/internal/nginx"
 	"archaeologist/internal/procfs"
+	"archaeologist/internal/rules"
 	"archaeologist/internal/store"
 	"archaeologist/internal/systemd"
+	"archaeologist/internal/verdict"
 )
 
 // newScanCmd wires the real scan pipeline: open the database, run the
@@ -35,15 +38,20 @@ func newScanCmd() *cobra.Command {
 		Use:   "scan",
 		Short: "Scan the host and print an infrastructure summary",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runScan(cmd.Context(), cmd.OutOrStdout(), dbPath, Version)
+			format, _ := cmd.Flags().GetString("format")
+			return runScan(cmd.Context(), cmd.OutOrStdout(), dbPath, Version, format)
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
 		"path to the SQLite evidence database")
+	addFormatFlag(cmd)
 	return cmd
 }
 
-func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion string) error {
+func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion, format string) error {
+	if err := validateFormat(format); err != nil {
+		return err
+	}
 	st, err := store.Open(ctx, dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
@@ -134,7 +142,63 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion string) error
 	if err != nil {
 		return err
 	}
-	return printScanSummary(w, scanID, hostname, status, res.Failed, sum)
+	rollup, err := computeAndSaveVerdicts(ctx, st, scanID)
+	if err != nil {
+		return err
+	}
+	if format == formatJSON {
+		return writeJSON(w, scanJSON{
+			ScanID:           scanID,
+			Host:             hostname,
+			Status:           status,
+			EntitiesByKind:   sum.Entities,
+			BlindSpots:       sum.BlindSpots,
+			Findings:         sum.Findings,
+			FailedCollectors: res.Failed,
+			Verdict:          rollup,
+		})
+	}
+	return printScanSummary(w, scanID, hostname, status, res.Failed, sum, rollup)
+}
+
+// scanJSON is the --format json shape for scan.
+type scanJSON struct {
+	ScanID           int64          `json:"scan_id"`
+	Host             string         `json:"host"`
+	Status           string         `json:"status"`
+	EntitiesByKind   map[string]int `json:"entities_by_kind"`
+	BlindSpots       int            `json:"blind_spots"`
+	Findings         int            `json:"findings"`
+	FailedCollectors []string       `json:"failed_collectors"`
+	Verdict          map[string]int `json:"verdict"`
+}
+
+// computeAndSaveVerdicts runs the verdict engine for every entity of
+// the scan, persists each result, and returns the state counts. This
+// gives the scan summary an at-a-glance health rollup; delete-check
+// later recomputes (rules overrides must win over the scan-time
+// default rules).
+func computeAndSaveVerdicts(ctx context.Context, st *store.Store, scanID int64) (map[string]int, error) {
+	r, hash, err := rules.Load("")
+	if err != nil {
+		return nil, err
+	}
+	ents, err := st.EntitiesInScan(ctx, scanID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	for _, ent := range ents {
+		in, err := st.BuildInput(ctx, scanID, ent.ID)
+		if err != nil {
+			return nil, fmt.Errorf("verdict input %s: %w", ent.IdentityKey, err)
+		}
+		res := verdict.Compute(in, r, now)
+		if err := st.SaveVerdict(ctx, ent.ID, scanID, res, hash); err != nil {
+			return nil, fmt.Errorf("save verdict %s: %w", ent.IdentityKey, err)
+		}
+	}
+	return st.VerdictRollup(ctx, scanID)
 }
 
 func printScanSummary(
@@ -143,6 +207,7 @@ func printScanSummary(
 	hostname, status string,
 	failed []string,
 	sum store.Summary,
+	rollup map[string]int,
 ) error {
 	if _, err := fmt.Fprintf(w, "Scan #%d — host=%s status=%s\n", scanID, hostname, status); err != nil {
 		return err
@@ -163,6 +228,9 @@ func printScanSummary(
 	if _, err := fmt.Fprintf(w, "  %-10s %d\n", "findings:", sum.Findings); err != nil {
 		return err
 	}
+	if _, err := fmt.Fprintln(w, formatVerdictRollup(rollup)); err != nil {
+		return err
+	}
 	if len(failed) > 0 {
 		// Every failure is already recorded as a blind spot.
 		if _, err := fmt.Fprintf(w, "  failed collectors: %s\n", strings.Join(failed, ", ")); err != nil {
@@ -179,4 +247,21 @@ func kernelRelease() string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// formatVerdictRollup renders the scan-time health line in Vietnamese,
+// one entry per verdict state (zero counts included so the layout is
+// stable).
+func formatVerdictRollup(rollup map[string]int) string {
+	labels := []struct{ state, label string }{
+		{verdict.StateActive, "active"},
+		{verdict.StateUnknown, "unknown"},
+		{verdict.StateLikelyOrphaned, "likely-orphaned"},
+		{verdict.StateOrphaned, "orphaned"},
+	}
+	parts := make([]string, 0, len(labels))
+	for _, l := range labels {
+		parts = append(parts, fmt.Sprintf("%s %d", l.label, rollup[l.state]))
+	}
+	return "  Verdict:   " + strings.Join(parts, " · ")
 }
