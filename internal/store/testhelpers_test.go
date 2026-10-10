@@ -130,3 +130,19 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// insertFindingRaw inserts one finding row directly.
+func insertFindingRaw(t *testing.T, s *Store, ctx context.Context, scanID, entityID int64, kind, severity string) int64 {
+	t.Helper()
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO findings (scan_id, entity_id, kind, severity, detail_json)
+		 VALUES (?, ?, ?, ?, '{}')`, scanID, entityID, kind, severity)
+	if err != nil {
+		t.Fatalf("insert finding: %v", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}

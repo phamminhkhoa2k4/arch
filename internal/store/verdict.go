@@ -496,3 +496,51 @@ func (s *Store) VerdictFor(ctx context.Context, entityID, scanID int64) (Verdict
 	_ = json.Unmarshal([]byte(reasons), &rec.Reasons)
 	return rec, nil
 }
+
+// VerdictRollup counts stored verdicts by state for one scan. States
+// with no rows are absent from the map.
+func (s *Store) VerdictRollup(ctx context.Context, scanID int64) (map[string]int, error) {
+	rs, err := s.db.QueryContext(ctx,
+		`SELECT state, count(*) FROM verdicts WHERE scan_id = ? GROUP BY state`,
+		scanID)
+	if err != nil {
+		return nil, fmt.Errorf("verdict rollup: %w", err)
+	}
+	defer func() { _ = rs.Close() }()
+	out := map[string]int{}
+	for rs.Next() {
+		var state string
+		var n int
+		if err := rs.Scan(&state, &n); err != nil {
+			return nil, err
+		}
+		out[state] = n
+	}
+	return out, rs.Err()
+}
+
+// HasBrokenRoute reports whether the entity carries a BROKEN_ROUTE
+// finding in the given scan.
+func (s *Store) HasBrokenRoute(ctx context.Context, scanID, entityID int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM findings
+		 WHERE scan_id = ? AND entity_id = ? AND kind = 'BROKEN_ROUTE'`,
+		scanID, entityID).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("broken route check: %w", err)
+	}
+	return n > 0, nil
+}
+
+// EntitiesInScan lists every entity of one scan (id, kind, name,
+// identity key) ordered by identity key — the rollup loop input.
+func (s *Store) EntitiesInScan(ctx context.Context, scanID int64) ([]EntityRow, error) {
+	rows, err := s.queryEntities(ctx,
+		`SELECT id, kind, name, identity_key, attributes_json FROM entities
+		 WHERE scan_id = ? ORDER BY identity_key`, scanID)
+	if err != nil {
+		return nil, fmt.Errorf("entities in scan: %w", err)
+	}
+	return rows, nil
+}

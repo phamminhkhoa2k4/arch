@@ -276,3 +276,68 @@ func TestVerdictForReturnsNoRows(t *testing.T) {
 		t.Errorf("err = %v, want sql.ErrNoRows", err)
 	}
 }
+
+// VerdictRollup counts stored verdicts by state for one scan only.
+func TestVerdictRollup(t *testing.T) {
+	s := newVerdictStore(t)
+	ctx := context.Background()
+	_, scanID := seedVerdictScan(t, s, ctx)
+	usedEnt := seedVerdictEntity(t, s, ctx, scanID, "container", "a", map[string]string{})
+	quietEnt := seedVerdictEntity(t, s, ctx, scanID, "container", "b", map[string]string{})
+	procEnt := seedVerdictEntity(t, s, ctx, scanID, "process", "c", map[string]string{})
+	for _, c := range []struct {
+		id    int64
+		state string
+	}{{usedEnt, verdict.StateActive}, {quietEnt, verdict.StateOrphaned}, {procEnt, verdict.StateOrphaned}} {
+		if err := s.SaveVerdict(ctx, c.id, scanID, verdict.Result{State: c.state, Coverage: "HIGH"}, "h"); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+	}
+	got, err := s.VerdictRollup(ctx, scanID)
+	if err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	if got[verdict.StateActive] != 1 || got[verdict.StateOrphaned] != 2 {
+		t.Errorf("rollup = %v, want active:1 orphaned:2", got)
+	}
+	if _, err := s.VerdictRollup(ctx, 999); err != nil {
+		t.Errorf("empty scan rollup err: %v", err)
+	}
+}
+
+// HasBrokenRoute is true only for BROKEN_ROUTE findings of that entity.
+func TestHasBrokenRoute(t *testing.T) {
+	s := newVerdictStore(t)
+	ctx := context.Background()
+	_, scanID := seedVerdictScan(t, s, ctx)
+	eid := seedVerdictEntity(t, s, ctx, scanID, "nginx_route", "/dead/", map[string]string{})
+	other := seedVerdictEntity(t, s, ctx, scanID, "container", "x", map[string]string{})
+
+	if ok, err := s.HasBrokenRoute(ctx, scanID, eid); err != nil || ok {
+		t.Fatalf("before finding: ok=%v err=%v, want false/nil", ok, err)
+	}
+	insertFindingRaw(t, s, ctx, scanID, eid, "BROKEN_ROUTE", "warn")
+	if ok, err := s.HasBrokenRoute(ctx, scanID, eid); err != nil || !ok {
+		t.Fatalf("after BROKEN_ROUTE: ok=%v err=%v", ok, err)
+	}
+	insertFindingRaw(t, s, ctx, scanID, other, "UNUSED_IMAGE", "info")
+	if ok, err := s.HasBrokenRoute(ctx, scanID, other); err != nil || ok {
+		t.Fatalf("UNUSED_IMAGE must not count: ok=%v err=%v", ok, err)
+	}
+}
+
+// EntitiesInScan lists every entity of the scan ordered by identity key.
+func TestEntitiesInScan(t *testing.T) {
+	s := newVerdictStore(t)
+	ctx := context.Background()
+	_, scanID := seedVerdictScan(t, s, ctx)
+	seedVerdictEntity(t, s, ctx, scanID, "container", "b", map[string]string{})
+	seedVerdictEntity(t, s, ctx, scanID, "container", "a", map[string]string{})
+	ents, err := s.EntitiesInScan(ctx, scanID)
+	if err != nil {
+		t.Fatalf("entities: %v", err)
+	}
+	if len(ents) != 2 || ents[0].Name != "a" || ents[1].Name != "b" {
+		t.Errorf("ents = %+v, want a then b", ents)
+	}
+}

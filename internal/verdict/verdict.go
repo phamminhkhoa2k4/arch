@@ -117,17 +117,17 @@ type Item struct {
 
 // Result is the full verdict.
 type Result struct {
-	State      string
-	Coverage   string
-	Blockers   []Item
-	Signals    []Item
-	Blinds     []Blind
-	Window     Window
-	WindowOK   bool
-	Applicable []string
-	Missing    []string
-	Reasons    []string
-	Action     string
+	State      string   `json:"state"`
+	Coverage   string   `json:"coverage"`
+	Blockers   []Item   `json:"blockers"`
+	Signals    []Item   `json:"signals"`
+	Blinds     []Blind  `json:"blinds"`
+	Window     Window   `json:"window"`
+	WindowOK   bool     `json:"window_ok"`
+	Applicable []string `json:"applicable"`
+	Missing    []string `json:"missing"`
+	Reasons    []string `json:"reasons"`
+	Action     string   `json:"action"`
 }
 
 // Compute decides the verdict for in under r. Order: hard blockers
