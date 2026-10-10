@@ -569,3 +569,59 @@ func TestPathRows(t *testing.T) {
 		t.Errorf("row[1] = %+v", rows[1])
 	}
 }
+
+// The store choke-point masks credential-bearing attribute/value/detail
+// keys before they hit the database; correlation keys survive.
+func TestSinkRedactsBeforeWrite(t *testing.T) {
+	s := openTemp(t)
+	k := newScan(t, s)
+	ctx := context.Background()
+
+	e := procEntity("process|9|2")
+	e.Attributes["db_password"] = "hunter2"
+	e.Attributes["state"] = "running"
+	if err := k.UpsertEntity(e); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := k.AddEvidence(collector.Evidence{
+		EntityIdentityKey: e.IdentityKey, Polarity: collector.PolarityNeutral,
+		Channel: "environ", Strength: collector.StrengthDeterministic,
+		ObservedAt: now(), RawRef: "/proc/9/environ",
+		Value: map[string]string{
+			"DATABASE_PASSWORD": "supersecret123",
+			"API_HOST":          "https://api.internal.local:8080",
+			"command":           "mysqld --password=hunter2",
+		},
+	}); err != nil {
+		t.Fatalf("evidence: %v", err)
+	}
+	if err := k.AddBlindSpot(collector.BlindSpot{
+		EntityIdentityKey: e.IdentityKey, Channel: "systemd",
+		Reason: "exec_start_unresolved",
+		Detail: map[string]string{"value": "app --token=abc123", "unit": "app.service"},
+	}); err != nil {
+		t.Fatalf("blind spot: %v", err)
+	}
+
+	var attrs, val, detail string
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT attributes_json FROM entities WHERE identity_key='process|9|2'`).Scan(&attrs)
+	_ = s.db.QueryRowContext(ctx, `SELECT value_json FROM evidence`).Scan(&val)
+	_ = s.db.QueryRowContext(ctx, `SELECT detail_json FROM blind_spots`).Scan(&detail)
+	for _, j := range []string{attrs, val, detail} {
+		if strings.Contains(j, "hunter2") || strings.Contains(j, "supersecret123") ||
+			strings.Contains(j, "abc123") {
+			t.Fatalf("raw secret survived choke-point: attrs=%s val=%s detail=%s", attrs, val, detail)
+		}
+	}
+	// json.Marshal HTML-escapes "<" — accept the escaped form.
+	if !strings.Contains(attrs, "redacted") || !strings.Contains(attrs, "running") {
+		t.Errorf("attrs wrong: %s", attrs)
+	}
+	if !strings.Contains(val, "https://api.internal.local:8080") {
+		t.Errorf("API_HOST lost: %s", val)
+	}
+	if !strings.Contains(detail, "app.service") {
+		t.Errorf("non-secret blind detail lost: %s", detail)
+	}
+}

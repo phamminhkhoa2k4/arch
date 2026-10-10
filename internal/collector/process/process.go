@@ -15,6 +15,7 @@ import (
 
 	"archaeologist/internal/collector"
 	"archaeologist/internal/procfs"
+	"archaeologist/internal/redact"
 )
 
 // Collector walks /proc through a procfs.Reader (fake in tests).
@@ -119,7 +120,7 @@ func (c *Collector) emit(sink collector.Sink, pid string) error {
 	if err := sink.UpsertEntity(entity); err != nil {
 		return err
 	}
-	return sink.AddEvidence(collector.Evidence{
+	if err := sink.AddEvidence(collector.Evidence{
 		EntityIdentityKey: key,
 		Polarity:          collector.PolarityInUse,
 		Channel:           "procfs",
@@ -130,7 +131,51 @@ func (c *Collector) emit(sink collector.Sink, pid string) error {
 			"pid":   strconv.Itoa(st.PID),
 			"state": st.State,
 		},
+	}); err != nil {
+		return err
+	}
+	return c.emitEnviron(sink, pid, key, base)
+}
+
+// emitEnviron reads /proc/<pid>/environ (NUL-separated NAME=VALUE),
+// redacts credential-bearing names/values, and records the result as
+// one evidence row. A denied or vanished file is skipped silently:
+// cross-user environ is expected to be unreadable and the stat read
+// already reported the pid-level permission blind spot.
+func (c *Collector) emitEnviron(sink collector.Sink, pid, key, base string) error {
+	data, err := c.fs.ReadFile(base + "/environ")
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	env := redact.RedactEnv(parseEnviron(data))
+	if len(env) == 0 {
+		return nil
+	}
+	return sink.AddEvidence(collector.Evidence{
+		EntityIdentityKey: key,
+		Polarity:          collector.PolarityNeutral,
+		Channel:           "environ",
+		Strength:          collector.StrengthDeterministic,
+		ObservedAt:        time.Now().UTC().Format(time.RFC3339),
+		RawRef:            base + "/environ",
+		Value:             env,
 	})
+}
+
+// parseEnviron splits the NUL-separated NAME=VALUE blob.
+func parseEnviron(b []byte) map[string]string {
+	out := map[string]string{}
+	for _, entry := range strings.Split(strings.TrimRight(string(b), "\x00"), "\x00") {
+		if entry == "" {
+			continue
+		}
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok || name == "" {
+			continue
+		}
+		out[name] = value
+	}
+	return out
 }
 
 // readOrBlind reads path and converts per-pid failures into blind spots:

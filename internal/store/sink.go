@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"archaeologist/internal/collector"
+	"archaeologist/internal/redact"
 )
 
 // ScanSink adapts collector output to the schema for one open scan.
@@ -54,10 +55,12 @@ func jsonMap(m map[string]string) (string, error) {
 
 // UpsertEntity inserts the entity or refreshes it when the same identity
 // key is emitted again within this scan (id stays stable for edges).
+// Attribute values pass the redaction choke-point first.
 func (k *ScanSink) UpsertEntity(e collector.Entity) error {
 	if e.IdentityKey == "" {
 		return fmt.Errorf("upsert entity: empty identity_key")
 	}
+	e.Attributes = redact.RedactMap(e.Attributes)
 	attrs, err := jsonMap(e.Attributes)
 	if err != nil {
 		return fmt.Errorf("upsert entity %q: marshal attributes: %w", e.IdentityKey, err)
@@ -90,6 +93,7 @@ func (k *ScanSink) UpsertEntity(e collector.Entity) error {
 
 // AddEvidence records one fact for an entity already known to this sink.
 // Non-empty Ref is a collector-local handle edges can reference.
+// Values pass the redaction choke-point before they hit the database.
 func (k *ScanSink) AddEvidence(e collector.Evidence) error {
 	if e.RawRef == "" {
 		return fmt.Errorf("evidence for %q: empty raw_ref", e.EntityIdentityKey)
@@ -103,6 +107,7 @@ func (k *ScanSink) AddEvidence(e collector.Evidence) error {
 			return fmt.Errorf("duplicate evidence ref %q", e.Ref)
 		}
 	}
+	e.Value = redact.RedactMap(e.Value)
 	val, err := jsonMap(e.Value)
 	if err != nil {
 		return fmt.Errorf("evidence for %q: marshal value: %w", e.EntityIdentityKey, err)
@@ -166,6 +171,7 @@ func (k *ScanSink) AddBlindSpot(b collector.BlindSpot) error {
 		}
 		entityID = id
 	}
+	b.Detail = redact.RedactMap(b.Detail)
 	detail, err := jsonMap(b.Detail)
 	if err != nil {
 		return fmt.Errorf("blind spot %s/%s: marshal detail: %w", b.Channel, b.Reason, err)

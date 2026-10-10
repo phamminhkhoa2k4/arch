@@ -228,3 +228,77 @@ func keys(s *recSink) []string {
 	}
 	return out
 }
+
+// Environ is captured with credential names/values masked; the raw
+// secret must not appear anywhere in the recorded evidence.
+func TestCollectRedactsEnviron(t *testing.T) {
+	f := newFake()
+	f.dirs["/proc"] = []string{"100"}
+	f.files["/proc/100/stat"] = []byte(makeStat(100, "app", 1, 7))
+	f.files["/proc/100/cmdline"] = []byte("/usr/bin/app\x00")
+	f.files["/proc/100/status"] = []byte("Uid:\t1000\t1000\t1000\t1000\n")
+	f.files["/proc/100/cgroup"] = []byte("0::/\n")
+	f.files["/proc/100/environ"] = []byte(
+		"DATABASE_PASSWORD=supersecret123\x00" +
+			"API_HOST=https://api.internal.local:8080\x00" +
+			"PWD=/opt/app\x00" +
+			"RANDOM_BLOB=aGVsbG8td29ybGQtc2VjcmV0LXRva2VuIQ\x00")
+
+	sink := newRecSink()
+	if err := New(f).Collect(context.Background(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	var env *collector.Evidence
+	for i := range sink.evidence {
+		if sink.evidence[i].Channel == "environ" {
+			env = &sink.evidence[i]
+		}
+	}
+	if env == nil {
+		t.Fatalf("no environ evidence: %+v", sink.evidence)
+	}
+	if env.Value["DATABASE_PASSWORD"] != "<redacted>" {
+		t.Errorf("DATABASE_PASSWORD = %q, want <redacted>", env.Value["DATABASE_PASSWORD"])
+	}
+	if env.Value["API_HOST"] != "https://api.internal.local:8080" {
+		t.Errorf("API_HOST = %q, want kept", env.Value["API_HOST"])
+	}
+	if env.Value["PWD"] != "/opt/app" {
+		t.Errorf("PWD = %q, want kept", env.Value["PWD"])
+	}
+	if env.Value["RANDOM_BLOB"] != "<redacted>" {
+		t.Errorf("RANDOM_BLOB = %q, want <redacted> (entropy)", env.Value["RANDOM_BLOB"])
+	}
+	for _, ev := range sink.evidence {
+		for _, v := range ev.Value {
+			if strings.Contains(v, "supersecret123") {
+				t.Fatalf("raw secret leaked in evidence: %+v", ev)
+			}
+		}
+	}
+}
+
+// A denied environ file is skipped silently — no crash, no new blind
+// spot (the stat denial already reported the pid).
+func TestCollectEnvironDeniedSilent(t *testing.T) {
+	f := newFake()
+	f.dirs["/proc"] = []string{"100"}
+	f.files["/proc/100/stat"] = []byte(makeStat(100, "app", 1, 7))
+	f.files["/proc/100/cmdline"] = []byte("/usr/bin/app\x00")
+	f.files["/proc/100/status"] = []byte("Uid:\t1000\t1000\t1000\t1000\n")
+	f.files["/proc/100/cgroup"] = []byte("0::/\n")
+	f.errs["/proc/100/environ"] = os.ErrPermission
+
+	sink := newRecSink()
+	if err := New(f).Collect(context.Background(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(sink.blinds) != 0 {
+		t.Errorf("environ denial must not add blind spots: %+v", sink.blinds)
+	}
+	for _, ev := range sink.evidence {
+		if ev.Channel == "environ" {
+			t.Error("denied environ must not produce evidence")
+		}
+	}
+}

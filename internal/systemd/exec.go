@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"archaeologist/internal/redact"
 )
 
 // Exec is one parsed ExecStart-style command.
@@ -212,6 +214,22 @@ func EnvMap(lines []Directive) map[string]string {
 		}
 	}
 	return env
+}
+
+// RedactEnvMap returns a copy of env with credential-bearing values
+// replaced by the redaction mask, so expanded ExecStart arguments can
+// be stored without leaking Environment= secrets. Path resolution
+// keeps using the original map.
+func RedactEnvMap(env map[string]string) map[string]string {
+	out := make(map[string]string, len(env))
+	for k, v := range env {
+		if redact.IsSecretName(k) {
+			out[k] = redact.Mask
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // IsAbs reports an absolute filesystem path.

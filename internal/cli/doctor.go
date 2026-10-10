@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"strconv"
 
 	"archaeologist/internal/procfs"
@@ -41,6 +42,23 @@ func realChecks() []doctorCheck {
 			fail: "Không truy cập D-Bus systemd",
 			hint: "chạy sudo — cần truy cập /run/dbus/system_bus_socket",
 			run:  checkUnixSocket("/run/dbus/system_bus_socket"),
+		},
+		{
+			pass: "Nginx configs (/etc/nginx)",
+			fail: "Không đọc được /etc/nginx",
+			hint: "chạy sudo hoặc cấp quyền đọc — collector nginx cần liệt kê cấu hình",
+			run: func() error {
+				_, err := os.ReadDir("/etc/nginx")
+				return err
+			},
+		},
+		{
+			pass: "Systemd journal (journalctl)",
+			fail: "Không chạy được journalctl",
+			hint: "cài systemd hoặc thêm user vào group systemd-journal",
+			run: func() error {
+				return exec.Command("journalctl", "-n", "1", "--no-pager").Run()
+			},
 		},
 		{
 			pass: "Log paths (/var/log)",

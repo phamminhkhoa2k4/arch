@@ -291,9 +291,13 @@ func (c *Collector) emitExecs(
 			target = systemd.JoinPath(wd, target)
 		}
 		fullArgs := make([]string, 0, len(ex.Args)+1)
+		// Args are expanded against the redacted environment so a
+		// ${SECRET} reference never reaches the evidence row; the
+		// path above keeps the real values for filesystem lookups.
+		envDisplay := systemd.RedactEnvMap(env)
 		resolvedOK := true
 		for _, a := range ex.Args {
-			ra, aOK := systemd.Expand(a, env, spec)
+			ra, aOK := systemd.Expand(a, envDisplay, spec)
 			if !aOK {
 				if bErr := blind("exec_start_unresolved", map[string]string{"value": a}); bErr != nil {
 					return bErr

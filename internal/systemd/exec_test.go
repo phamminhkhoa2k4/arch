@@ -131,3 +131,29 @@ func TestClassify(t *testing.T) {
 		t.Error("empty file must be unknown")
 	}
 }
+
+// Environment values under secret-bearing names are masked for display
+// expansion while non-secret values pass through untouched.
+func TestRedactEnvMap(t *testing.T) {
+	in := map[string]string{
+		"DB_PASSWORD":  "hunter2",
+		"GITHUB_TOKEN": "ghp_abc",
+		"HOME":         "/root",
+		"LISTEN_PORT":  "8080",
+	}
+	out := RedactEnvMap(in)
+	if out["DB_PASSWORD"] != "<redacted>" || out["GITHUB_TOKEN"] != "<redacted>" {
+		t.Errorf("secret not masked: %v", out)
+	}
+	if out["HOME"] != "/root" || out["LISTEN_PORT"] != "8080" {
+		t.Errorf("non-secret changed: %v", out)
+	}
+	if in["DB_PASSWORD"] != "hunter2" {
+		t.Error("input map mutated")
+	}
+	// Expanded argument must contain the mask, not the secret.
+	got, ok := Expand("-p${DB_PASSWORD}", out, nil)
+	if !ok || got != "-p<redacted>" {
+		t.Errorf("Expand = %q ok=%v, want -p<redacted>", got, ok)
+	}
+}
