@@ -31,7 +31,7 @@ func Execute() int {
 	addCommands(root)
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
-		return 2
+		return exitCodeOf(err)
 	}
-	return 0
+	return ExitOK
 }
