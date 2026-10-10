@@ -21,12 +21,7 @@ func addCommands(root *cobra.Command) {
 		newObserveCmd(),
 		newExplainCmd(),
 		newDeleteCheckCmd(),
-		&cobra.Command{
-			Use:   "plan <component>",
-			Short: "Generate a staged cleanup plan with rollback commands",
-			Args:  cobra.ExactArgs(1),
-			Run:   stub(),
-		},
+		newPlanCmd(),
 		&cobra.Command{
 			Use:   "report",
 			Short: "Export results as HTML, JSON, or Markdown",
