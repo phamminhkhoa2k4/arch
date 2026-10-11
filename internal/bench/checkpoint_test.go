@@ -145,3 +145,41 @@ components:
 		t.Errorf("err = %v, want no-ref complaint", err)
 	}
 }
+
+// Recall counts every expected-ORPHANED component and every orphan
+// verdict on them; the fixture's four true orphans are all found.
+func TestCheckpointRecallOnLabFixture(t *testing.T) {
+	working, cleanup, err := copyDB(filepath.Join("..", "..", "lab", "fixtures", "scan.db"))
+	if err != nil {
+		t.Fatalf("copy fixture: %v", err)
+	}
+	defer cleanup()
+	gtPath := filepath.Join("..", "..", "lab", "ground-truth.yaml")
+	rulesPath := filepath.Join("..", "..", "lab", "rules.lab.yaml")
+	gt, err := LoadGT(gtPath)
+	if err != nil {
+		t.Fatalf("gt: %v", err)
+	}
+	r, _, err := rules.Load(rulesPath)
+	if err != nil {
+		t.Fatalf("rules: %v", err)
+	}
+	cp, err := MeasureCheckpoint(working, gt, r)
+	if err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if cp.OrphanExpected != 4 {
+		t.Errorf("OrphanExpected = %d, want 4", cp.OrphanExpected)
+	}
+	if cp.OrphanHits != 4 || cp.Recall() != 100.0 {
+		t.Errorf("Recall = %d/%d = %.1f%%, want 4/4 = 100%%",
+			cp.OrphanHits, cp.OrphanExpected, cp.Recall())
+	}
+	var buf bytes.Buffer
+	if err := cp.Write(&buf); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Recall ORPHANED: 4/4 = 100.0%") {
+		t.Errorf("recall line missing:\n%s", buf.String())
+	}
+}

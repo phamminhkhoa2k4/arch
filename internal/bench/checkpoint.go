@@ -42,6 +42,12 @@ type CheckpointReport struct {
 	// Predictions is LikelyTP+LikelyFP; zero means the precision is
 	// vacuous and passes (D1).
 	Predictions int
+	// OrphanExpected/OrphanHits are the true-orphan recall: every
+	// ground-truth component expected ORPHANED is a denominator slot;
+	// an orphan verdict (LIKELY_ORPHANED or ORPHANED) on it is a hit.
+	// Published, never gated.
+	OrphanExpected int
+	OrphanHits     int
 	// TrapResults lists every trap component with its verdict so a
 	// reader can see the three known traps did not flip.
 	TrapResults []componentVerdict
@@ -101,13 +107,16 @@ func MeasureCheckpoint(dbPath string, gt *GroundTruth, r rules.Rules) (*Checkpoi
 			cp.LikelyFPList = append(cp.LikelyFPList, cv)
 		}
 	}
-	// True positives: LIKELY_ORPHANED on a component that really is
-	// orphaned. One more pass keeps the first loop single-exit and
-	// only touches the (few) orphan-expected components.
+	// True positives + recall: pass over the orphan-expected
+	// components once. LIKELY_ORPHANED is the precision true-positive;
+	// any orphan claim counts toward recall. One pass keeps the first
+	// loop single-exit and only touches the (few) orphan-expected
+	// components.
 	for _, comp := range gt.Components {
 		if comp.Expected != string(verdict.StateOrphaned) {
 			continue
 		}
+		cp.OrphanExpected++
 		ents, err := st.FindEntities(ctx, scanID, comp.Ref)
 		if err != nil || len(ents) != 1 {
 			continue // recorded in Errors by the first pass when applicable
@@ -116,12 +125,22 @@ func MeasureCheckpoint(dbPath string, gt *GroundTruth, r rules.Rules) (*Checkpoi
 		if err != nil {
 			continue
 		}
-		if verdict.Compute(in, r, now).State == string(verdict.StateLikelyOrphaned) {
+		got := verdict.Compute(in, r, now).State
+		if got == string(verdict.StateLikelyOrphaned) {
 			cp.LikelyTP++
+		}
+		if isOrphanVerdict(string(got)) {
+			cp.OrphanHits++
 		}
 	}
 	cp.Predictions = cp.LikelyTP + cp.LikelyFP
 	return cp, nil
+}
+
+// Recall is the true-orphan recall in percent; an empty denominator is
+// a vacuous 100%.
+func (c *CheckpointReport) Recall() float64 {
+	return percent(c.OrphanHits, c.OrphanExpected)
 }
 
 // Precision is the LIKELY_ORPHANED precision in percent; an empty
@@ -179,6 +198,10 @@ func (c *CheckpointReport) Write(out io.Writer) error {
 				return err
 			}
 		}
+	}
+	if _, err := fmt.Fprintf(out, "Recall ORPHANED: %d/%d = %.1f%% (informational)\n",
+		c.OrphanHits, c.OrphanExpected, c.Recall()); err != nil {
+		return err
 	}
 	if len(c.TrapResults) > 0 {
 		if _, err := fmt.Fprintln(out, "Bẫy:"); err != nil {

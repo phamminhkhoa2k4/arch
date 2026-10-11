@@ -3,6 +3,7 @@ package bench
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,7 +211,7 @@ func TestBenchToolErrorBadGT(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	err := Run(db, broken, "", &bytes.Buffer{})
+	err := Run(db, broken, "", "", "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("Run with empty-benchmark GT must fail")
 	}
@@ -250,7 +251,7 @@ components:
 	if err := os.WriteFile(gtPath, []byte(gtYAML), 0o644); err != nil {
 		t.Fatalf("write gt: %v", err)
 	}
-	err = Run(empty, gtPath, "", &bytes.Buffer{})
+	err = Run(empty, gtPath, "", "", "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("db without scans must fail")
 	}
@@ -337,5 +338,98 @@ func TestPercentEmptyDenominator(t *testing.T) {
 	}
 	if got := percent(1, 4); got != 25.0 {
 		t.Errorf("percent(1,4) = %.1f, want 25", got)
+	}
+}
+
+// Integrity metrics on the golden fixture: raw_ref is 100%, the scan
+// duration is derivable, and a missing sampler log yields n/a.
+func TestMeasureIntegrityOnLabFixture(t *testing.T) {
+	working, cleanup, err := copyDB(filepath.Join("..", "..", "lab", "fixtures", "scan.db"))
+	if err != nil {
+		t.Fatalf("copy fixture: %v", err)
+	}
+	defer cleanup()
+	rep, err := MeasureIntegrity(working, "")
+	if err != nil {
+		t.Fatalf("integrity: %v", err)
+	}
+	if rep.RawRefTotal == 0 || rep.RawRefOK != rep.RawRefTotal || rep.RawRefPct != 100.0 {
+		t.Errorf("raw_ref = %d/%d = %.1f%%, want full coverage",
+			rep.RawRefOK, rep.RawRefTotal, rep.RawRefPct)
+	}
+	if rep.ScanSeconds == nil || *rep.ScanSeconds <= 0 {
+		t.Errorf("ScanSeconds = %v, want positive duration", rep.ScanSeconds)
+	}
+	if !strings.Contains(rep.Observe, "n/a") {
+		t.Errorf("Observe = %q, want n/a without sampler log", rep.Observe)
+	}
+	var buf bytes.Buffer
+	if err := rep.Write(&buf); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Evidence có raw_ref") ||
+		!strings.Contains(buf.String(), "Overhead observe") {
+		t.Errorf("integrity section incomplete:\n%s", buf.String())
+	}
+}
+
+// A well-formed sampler log is parsed into CPU and RAM numbers.
+func TestParseObserveLog(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "observe-sla.log")
+	content := "" +
+		"2026-10-07T20:00:00Z pid=100 utime=1000 stime=200 rss_kb=40960\n" +
+		"2026-10-07T20:10:00Z pid=100 utime=1600 stime=260 rss_kb=51200\n"
+	if err := os.WriteFile(logPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := parseObserveLog(logPath)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	// Δticks=660 → 6.6s CPU over 600s wall = 1.1%; max RSS 51200 KB.
+	if !strings.Contains(got, "CPU 1.10%") || !strings.Contains(got, "51200 KB") ||
+		!strings.Contains(got, "2 mẫu") {
+		t.Errorf("summary = %q, want CPU 1.10%% · RAM tối đa 51200 KB (2 mẫu)", got)
+	}
+}
+
+// One JSONL line per run, parseable, carrying sha and metrics.
+func TestAppendHistory(t *testing.T) {
+	history := filepath.Join(t.TempDir(), "bench", "history.jsonl")
+	rep := &Report{OwnedPct: 100, RoutesPct: 100}
+	cp := &CheckpointReport{NonOrphanExpected: 19, LikelyTP: 0, LikelyFP: 0,
+		OrphanExpected: 4, OrphanHits: 4}
+	integ := &IntegrityReport{RawRefOK: 10, RawRefTotal: 10, RawRefPct: 100,
+		Observe: "n/a"}
+	for i := 0; i < 2; i++ {
+		if err := AppendHistory(history, newHistoryRecord(rep, cp, integ)); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	data, err := os.ReadFile(history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+	var rec HistoryRecord
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rec.GeneratedAt == "" || rec.GitSHA == "" {
+		t.Errorf("metadata missing: %+v", rec)
+	}
+	if rec.Metrics.OrphanRecall != 100.0 || rec.Metrics.RawRefPct != 100.0 ||
+		rec.Metrics.OwnedPct != 100.0 || rec.Metrics.ScanSeconds != nil {
+		t.Errorf("metrics wrong: %+v", rec.Metrics)
+	}
+	if rec.Gates.CheckpointFailed {
+		t.Error("gate should pass on this data")
+	}
+	// Empty path is a no-op.
+	if err := AppendHistory("", rec); err != nil {
+		t.Errorf("empty path must be no-op: %v", err)
 	}
 }

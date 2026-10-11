@@ -37,9 +37,20 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      # Correlation misses print ::warning annotations and exit 0;
+      # Correlation misses and the published-but-ungated metrics
+      # (recall, raw_ref, scan duration, observe overhead) print
+      # ::warning annotations or informational lines and exit 0;
       # a Checkpoint #2 miss (false-orphan > 0 or LIKELY_ORPHANED
       # precision below 95%) exits 1 and fails the job, blocking the
-      # merge. Tool errors also fail the job.
+      # merge. Tool errors also fail the job. The run appends one
+      # JSON line (timestamp + git sha + all metrics) to the history
+      # file, uploaded as an artifact for cross-run comparison.
       - name: Benchmark
-        run: go run ./cmd/bench --db lab/fixtures/scan.db --gt lab/ground-truth.yaml --rules lab/rules.lab.yaml
+        run: go run ./cmd/bench --db lab/fixtures/scan.db --gt lab/ground-truth.yaml --rules lab/rules.lab.yaml --out bench-results/history.jsonl
+      - name: Upload benchmark history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-history
+          path: bench-results/history.jsonl
+          if-no-files-found: ignore
