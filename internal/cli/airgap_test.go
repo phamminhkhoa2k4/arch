@@ -11,8 +11,9 @@ import (
 	"testing"
 )
 
-// The product's only HTTP client lives in the docker client; nothing
-// else in internal/ may import net/http (test fakes excluded).
+// The product's only HTTP client lives in the docker client; the web
+// UI server is the only HTTP server (local listen, no client calls).
+// Nothing else in internal/ may import net/http (test fakes excluded).
 // net/rpc is banned everywhere. net.Dial calls are limited to the two
 // documented sites: the doctor's unix-socket probe and the docker
 // client's socket dialer.
@@ -21,12 +22,21 @@ func TestImportBoundary(t *testing.T) {
 	httpPkg := regexp.MustCompile(`"net/http"`)
 	rpcPkg := regexp.MustCompile(`"net/rpc"`)
 	dialCall := regexp.MustCompile(`net\.Dial\(`)
-	allowedHTTP := map[string]bool{
-		filepath.Join(root, "docker", "client.go"): true,
+	allowedHTTPPrefix := []string{
+		filepath.Join(root, "docker", "client.go"),
+		filepath.Join(root, "webui") + string(filepath.Separator),
 	}
 	allowedDial := map[string]bool{
 		filepath.Join(root, "docker", "client.go"): true,
 		filepath.Join(root, "cli", "doctor.go"):    true,
+	}
+	httpAllowed := func(path string) bool {
+		for _, p := range allowedHTTPPrefix {
+			if strings.HasPrefix(path, p) {
+				return true
+			}
+		}
+		return false
 	}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -42,8 +52,8 @@ func TestImportBoundary(t *testing.T) {
 		if rpcPkg.Match(src) {
 			t.Errorf("%s: net/rpc is banned (DGRAM-free IPC boundary)", path)
 		}
-		if httpPkg.Match(src) && !allowedHTTP[path] {
-			t.Errorf("%s: net/http import outside internal/docker", path)
+		if httpPkg.Match(src) && !httpAllowed(path) {
+			t.Errorf("%s: net/http import outside docker client + webui", path)
 		}
 		if dialCall.Match(src) && !allowedDial[path] {
 			t.Errorf("%s: net.Dial call outside doctor/docker-client allowlist", path)

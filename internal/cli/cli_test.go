@@ -49,18 +49,25 @@ func TestExitCodes(t *testing.T) {
 	}
 }
 
-// Stub commands say they are not implemented yet (skeleton behavior).
-func TestStubCommandsSayNotImplemented(t *testing.T) {
+// serve is a real command now: --help lists its flags and executing it
+// without a database fails with an error rather than a stub message.
+func TestServeIsImplemented(t *testing.T) {
 	root := rootCmd()
 	addCommands(root)
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetErr(buf)
-	root.SetArgs([]string{"serve"})
+	root.SetArgs([]string{"serve", "--help"})
 	if err := root.Execute(); err != nil {
-		t.Fatalf("serve: %v", err)
+		t.Fatalf("serve --help: %v", err)
 	}
-	if !strings.Contains(buf.String(), "not implemented yet") {
-		t.Fatalf("stub output = %q", buf.String())
+	out := buf.String()
+	if strings.Contains(out, "not implemented yet") {
+		t.Fatalf("serve still stubbed:\n%s", out)
+	}
+	for _, flag := range []string{"--db", "--addr"} {
+		if !strings.Contains(out, flag) {
+			t.Errorf("serve --help missing %s", flag)
+		}
 	}
 }

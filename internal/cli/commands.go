@@ -1,19 +1,8 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
-
-// stub marks commands that are only registered for now — each
-// subcommand fills in its logic when built.
-func stub() func(*cobra.Command, []string) {
-	return func(c *cobra.Command, _ []string) {
-		_, _ = fmt.Fprintf(c.OutOrStdout(),
-			"%s is not implemented yet.\n", c.CommandPath())
-	}
-}
 
 func addCommands(root *cobra.Command) {
 	root.AddCommand(
@@ -23,11 +12,7 @@ func addCommands(root *cobra.Command) {
 		newDeleteCheckCmd(),
 		newPlanCmd(),
 		newReportCmd(),
-		&cobra.Command{
-			Use:   "serve",
-			Short: "Start the local web UI",
-			Run:   stub(),
-		},
+		newServeCmd(),
 		&cobra.Command{
 			Use:   "doctor",
 			Short: "Check access rights and report blind spots you would hit",
