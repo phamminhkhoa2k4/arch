@@ -643,3 +643,60 @@ func TestCollectLogReadErrorBlind(t *testing.T) {
 		t.Errorf("blinds = %+v", sink.blinds)
 	}
 }
+
+// An image carrying the OCI source label links its container to a
+// repo entity through a strong built_from edge; the image itself
+// records the URL in repo_source.
+func TestCollectOCILabelBuiltFrom(t *testing.T) {
+	api := baseInventory()
+	api.images[0].Label = map[string]string{
+		ociSourceLabel: "https://github.com/lab/web",
+	}
+	sink := newRecSink()
+	c := New(api, nil, nil)
+	if err := c.Collect(t.Context(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	repo, ok := sink.entities["repo|https://github.com/lab/web"]
+	if !ok {
+		t.Fatal("repo entity missing")
+	}
+	if repo.Kind != "repo" || repo.Attributes["url"] != "https://github.com/lab/web" {
+		t.Errorf("repo = %+v", repo)
+	}
+	if sink.entities["image|"+img1].Attributes["repo_source"] != "https://github.com/lab/web" {
+		t.Errorf("image repo_source = %q", sink.entities["image|"+img1].Attributes["repo_source"])
+	}
+	edges := edgeSet(sink.edges)
+	e, ok := edges["built_from container|"+idA+"->repo|https://github.com/lab/web"]
+	if !ok {
+		t.Fatalf("built_from edge missing: %+v", sink.edges)
+	}
+	if e.Strength != collector.StrengthStrongHeuristic || e.EvidenceRef == "" {
+		t.Errorf("edge = %+v", e)
+	}
+}
+
+// An image without the label just records repo_source=unknown; no
+// blind spot, no repo entity.
+func TestCollectOCIUnknownSourceIsQuiet(t *testing.T) {
+	api := baseInventory()
+	sink := newRecSink()
+	c := New(api, nil, nil)
+	if err := c.Collect(t.Context(), sink); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if got := sink.entities["image|"+img1].Attributes["repo_source"]; got != "unknown" {
+		t.Errorf("repo_source = %q, want unknown", got)
+	}
+	for _, b := range sink.blinds {
+		if strings.Contains(b.Reason, "oci") || strings.Contains(b.Reason, "repo") {
+			t.Errorf("unexpected blind: %+v", b)
+		}
+	}
+	for k := range sink.entities {
+		if strings.HasPrefix(k, "repo|") {
+			t.Errorf("unexpected repo entity %q", k)
+		}
+	}
+}

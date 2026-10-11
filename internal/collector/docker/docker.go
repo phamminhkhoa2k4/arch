@@ -46,7 +46,7 @@ func New(api docker.API, loader *compose.Loader, index Index) *Collector {
 func (c *Collector) Name() string { return "docker" }
 
 // Version implements collector.Collector.
-func (c *Collector) Version() string { return "1.1.0" }
+func (c *Collector) Version() string { return "1.2.0" }
 
 // Collect reads the whitelisted endpoints once and writes entities,
 // findings and edges. Any API failure is returned so the run loop can
@@ -93,12 +93,92 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 	if err := c.collectPublishedPorts(sink, containers, emitEvidence); err != nil {
 		return err
 	}
+	if err := c.collectOCI(sink, containers, images, emitEvidence); err != nil {
+		return err
+	}
 	return c.collectOwnership(sink, containers, refs)
 }
 
 // containerStateRef is the evidence reference shared by the state
 // evidence, belongs_to edges and manages edges of one container.
 func containerStateRef(id string) string { return "container-state:" + id }
+
+// ociSourceLabel is the OCI annotation carrying a source repository URL.
+const ociSourceLabel = "org.opencontainers.image.source"
+
+// collectOCI reads the OCI source-repository label from each image
+// used by a running container and links the container to a repo
+// entity. An image without the label is simply marked unknown — a
+// missing label is normal metadata, not blindness.
+func (c *Collector) collectOCI(
+	sink collector.Sink,
+	containers []docker.Container,
+	images []docker.Image,
+	emit func(collector.Evidence) error,
+) error {
+	repoByImage := map[string]string{} // image ID or tag -> source URL
+	for _, img := range images {
+		src := img.Label[ociSourceLabel]
+		if src == "" {
+			continue
+		}
+		repoByImage[img.ID] = src
+		for _, tag := range img.Tags {
+			repoByImage[tag] = src
+		}
+	}
+	for _, ct := range containers {
+		src := repoByImage[ct.ImageID]
+		if src == "" {
+			src = repoByImage[ct.Image]
+		}
+		if src == "" {
+			continue
+		}
+		repoKey := "repo|" + src
+		if err := sink.UpsertEntity(collector.Entity{
+			Kind:        "repo",
+			Name:        src,
+			IdentityKey: repoKey,
+			Fingerprint: repoFingerprint(src),
+			Attributes:  map[string]string{"url": src},
+		}); err != nil {
+			return err
+		}
+		ref := "docker-oci:" + ct.ID
+		if err := emit(collector.Evidence{
+			EntityIdentityKey: repoKey,
+			Polarity:          collector.PolarityNeutral,
+			Channel:           "docker",
+			Strength:          collector.StrengthStrongHeuristic,
+			ObservedAt:        nowRFC3339(),
+			RawRef:            "docker:/images/json",
+			Ref:               ref,
+			Value: map[string]string{
+				"container": ct.Name(),
+				"url":       src,
+				"label":     ociSourceLabel,
+			},
+		}); err != nil {
+			return err
+		}
+		if err := sink.UpsertEdge(collector.Edge{
+			SrcIdentityKey: "container|" + ct.ID,
+			DstIdentityKey: repoKey,
+			Kind:           "built_from",
+			Strength:       collector.StrengthStrongHeuristic,
+			EvidenceRef:    ref,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func repoFingerprint(url string) string {
+	h := sha256.Sum256([]byte(url))
+	return hex.EncodeToString(h[:])
+}
 
 func (c *Collector) collectContainers(
 	sink collector.Sink,
@@ -319,16 +399,21 @@ func (c *Collector) collectUnused(
 			polarity = collector.PolarityInUse
 		}
 		ref := "image-list:" + img.ID
+		attrs := map[string]string{
+			"id":   img.ID,
+			"tags": strings.Join(img.Tags, ", "),
+			"size": fmt.Sprintf("%d", img.Size),
+			"repo_source": img.Label[ociSourceLabel],
+		}
+		if attrs["repo_source"] == "" {
+			attrs["repo_source"] = "unknown"
+		}
 		if err := sink.UpsertEntity(collector.Entity{
 			Kind:        "image",
 			Name:        displayName(img.Tags, img.ID),
 			IdentityKey: key,
 			Fingerprint: img.ID,
-			Attributes: map[string]string{
-				"id":   img.ID,
-				"tags": strings.Join(img.Tags, ", "),
-				"size": fmt.Sprintf("%d", img.Size),
-			},
+			Attributes:  attrs,
 		}); err != nil {
 			return err
 		}

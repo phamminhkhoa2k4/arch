@@ -15,6 +15,7 @@ import (
 	acoll "archaeologist/internal/collector/accesslog"
 	ccoll "archaeologist/internal/collector/cron"
 	dcoll "archaeologist/internal/collector/docker"
+	gcoll "archaeologist/internal/collector/gitrepo"
 	"archaeologist/internal/collector/listener"
 	mcoll "archaeologist/internal/collector/mtime"
 	ncoll "archaeologist/internal/collector/nginx"
@@ -79,17 +80,20 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion, format strin
 	// it attaches request evidence to the route entities nginx just
 	// emitted. The cron collector traces crontab references against the
 	// unit and container snapshots the earlier collectors recorded, and
-	// the mtime collector runs last so every script entity (including
-	// the ones cron discovered) has a path to stat. The systemd, docker
-	// and cron collectors need the sink as their index, but the sink
-	// only exists after the scan row is created — build the list twice
-	// (Versions needs only names/versions).
+	// the mtime collector runs so every script entity (including
+	// the ones cron discovered) has a path to stat, and the git
+	// collector runs last so it can find repositories above every
+	// recorded script/binary path and parse their CI workflows. The
+	// systemd, docker, cron and git collectors need the sink as their
+	// index, but the sink only exists after the scan row is created —
+	// build the list twice (Versions needs only names/versions).
 	type scanIndex interface {
 		sysd.ProcessIndex
 		dcoll.Index
 		ncoll.Index
 		ccoll.Index
 		mcoll.Index
+		gcoll.Index
 	}
 	newCollectors := func(index scanIndex) []collector.Collector {
 		var sIdx sysd.ProcessIndex
@@ -97,12 +101,14 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion, format strin
 		var nIdx ncoll.Index
 		var cIdx ccoll.Index
 		var mIdx mcoll.Index
+		var gIdx gcoll.Index
 		if index != nil {
 			sIdx = index
 			dIdx = index
 			nIdx = index
 			cIdx = index
 			mIdx = index
+			gIdx = index
 		}
 		cc := ccoll.New(systemd.OSFS{}, cIdx)
 		cc.SetLastRun(ccoll.NewExecLastRun())
@@ -115,6 +121,7 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion, format strin
 			acoll.New(nginx.NewLoader(), nil),
 			cc,
 			mcoll.New(mIdx),
+			gcoll.New(gIdx),
 		}
 	}
 	cs := newCollectors(nil)
