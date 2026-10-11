@@ -22,11 +22,7 @@ func addCommands(root *cobra.Command) {
 		newExplainCmd(),
 		newDeleteCheckCmd(),
 		newPlanCmd(),
-		&cobra.Command{
-			Use:   "report",
-			Short: "Export results as HTML, JSON, or Markdown",
-			Run:   stub(),
-		},
+		newReportCmd(),
 		&cobra.Command{
 			Use:   "serve",
 			Short: "Start the local web UI",

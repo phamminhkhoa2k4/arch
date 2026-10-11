@@ -78,6 +78,9 @@ func TestAirGapCommandsNoEgress(t *testing.T) {
 		{"explain", []string{"explain", "--db", db, "nginx.service"}},
 		{"delete-check", []string{"delete-check", "--db", db, "nginx.service"}},
 		{"plan", []string{"plan", "--db", db, "--inventory", inv, "--rules-file", rules, "nginx.service"}},
+		{"report-json", []string{"report", "--db", db, "--format", "json"}},
+		{"report-md", []string{"report", "--db", db, "--format", "md"}},
+		{"report-html", []string{"report", "--db", db, "-o", filepath.Join(t.TempDir(), "r.html")}},
 	}
 	for _, step := range steps {
 		root := rootCmd()

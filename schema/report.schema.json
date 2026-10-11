@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist report --format json",
+  "type": "object",
+  "required": ["scan_id", "host", "status", "generated_at", "dashboard", "findings", "blind_spots"],
+  "properties": {
+    "scan_id": { "type": "integer" },
+    "host": { "type": "string" },
+    "status": { "type": "string", "enum": ["ok", "partial", "failed"] },
+    "generated_at": { "type": "string" },
+    "dashboard": {
+      "type": "object",
+      "required": ["entities_by_kind", "verdict", "blind_spots", "findings"],
+      "properties": {
+        "entities_by_kind": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        },
+        "verdict": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        },
+        "blind_spots": { "type": "integer" },
+        "findings": { "type": "integer" }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "severity", "detail", "entity_kind", "entity_name", "identity"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["BROKEN_ROUTE", "ORPHAN_CRON", "UNUSED_IMAGE", "UNUSED_VOLUME", "DANGLING_DEPENDS"]
+          },
+          "severity": { "type": "string", "enum": ["info", "warn"] },
+          "detail": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "entity_kind": { "type": "string" },
+          "entity_name": { "type": "string" },
+          "identity": { "type": "string" }
+        }
+      }
+    },
+    "blind_spots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["channel", "reason", "detail"],
+        "properties": {
+          "channel": { "type": "string" },
+          "reason": { "type": "string" },
+          "detail": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "entity_kind": { "type": "string" },
+          "entity_name": { "type": "string" }
+        }
+      }
+    }
+  }
+}
