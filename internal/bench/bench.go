@@ -46,14 +46,15 @@ type Report struct {
 
 // Run loads the ground truth and the scan database, computes the
 // correlation, checkpoint, and integrity metrics, writes the
-// human-readable report to out, and appends a JSONL history line when
-// historyPath is non-empty. Correlation misses add GitHub Actions
-// warning annotations and still return nil (exit 0); a checkpoint
-// miss returns an error so the CI job fails (D3) — the history line is
-// still written first. The database is copied to a temp file first:
-// the store flips the WAL header and the verdict cache writes rows —
-// neither may dirty the committed fixture.
-func Run(dbPath, gtPath, rulesPath, observeLog, historyPath string, out io.Writer) error {
+// human-readable report to out, appends a JSONL history line when
+// historyPath is non-empty, and writes a markdown release-notes
+// fragment when notesPath is non-empty. Correlation misses add GitHub
+// Actions warning annotations and still return nil (exit 0); a
+// checkpoint miss returns an error so the CI job fails (D3) — the
+// history line is still written first. The database is copied to a
+// temp file first: the store flips the WAL header and the verdict
+// cache writes rows — neither may dirty the committed fixture.
+func Run(dbPath, gtPath, rulesPath, observeLog, historyPath, notesPath string, out io.Writer) error {
 	gt, err := LoadGT(gtPath)
 	if err != nil {
 		return fmt.Errorf("ground truth: %w", err)
@@ -89,7 +90,11 @@ func Run(dbPath, gtPath, rulesPath, observeLog, historyPath string, out io.Write
 	if err := integ.Write(out); err != nil {
 		return err
 	}
-	if err := AppendHistory(historyPath, newHistoryRecord(rep, cp, integ)); err != nil {
+	rec := newHistoryRecord(rep, cp, integ)
+	if err := AppendHistory(historyPath, rec); err != nil {
+		return err
+	}
+	if err := WriteReleaseNotes(notesPath, rec); err != nil {
 		return err
 	}
 	if cp.GateFailed() {

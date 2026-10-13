@@ -211,7 +211,7 @@ func TestBenchToolErrorBadGT(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	err := Run(db, broken, "", "", "", &bytes.Buffer{})
+	err := Run(db, broken, "", "", "", "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("Run with empty-benchmark GT must fail")
 	}
@@ -251,7 +251,7 @@ components:
 	if err := os.WriteFile(gtPath, []byte(gtYAML), 0o644); err != nil {
 		t.Fatalf("write gt: %v", err)
 	}
-	err = Run(empty, gtPath, "", "", "", &bytes.Buffer{})
+	err = Run(empty, gtPath, "", "", "", "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("db without scans must fail")
 	}
