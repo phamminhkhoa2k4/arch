@@ -1,6 +1,6 @@
 # Infrastructure Archaeologist — local validation entrypoints.
 
-.PHONY: build test lint check cross bench benchmark snapshot release-check
+.PHONY: build test lint check cross bench benchmark snapshot release-check release-notes
 
 build:
 	go build ./...
@@ -34,3 +34,7 @@ release-check:
 ## snapshot: local goreleaser build without publishing (needs goreleaser installed).
 snapshot:
 	goreleaser release --snapshot --clean --skip=publish
+
+## release-notes: golden-fixture benchmark plus a markdown notes fragment.
+release-notes:
+	go run ./cmd/bench --db lab/fixtures/scan.db --gt lab/ground-truth.yaml --rules lab/rules.lab.yaml --out bench-results/history.jsonl --notes bench-results/release-notes.md

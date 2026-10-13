@@ -22,9 +22,11 @@ func main() {
 		"optional observe-sla sampler log for the overhead metric")
 	history := flag.String("out", "",
 		"append one JSON line of run metrics to this history file")
+	notes := flag.String("notes", "",
+		"write a markdown release-notes fragment of run metrics to this file")
 	flag.Parse()
 
-	if err := bench.Run(*db, *gt, *rulesFile, *observeLog, *history, os.Stdout); err != nil {
+	if err := bench.Run(*db, *gt, *rulesFile, *observeLog, *history, *notes, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "benchmark:", err)
 		os.Exit(1)
 	}

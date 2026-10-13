@@ -21,6 +21,15 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      # The golden-fixture benchmark feeds the release-notes footer.
+      - name: Benchmark release notes
+        run: |
+          go run ./cmd/bench --db lab/fixtures/scan.db --gt lab/ground-truth.yaml --rules lab/rules.lab.yaml --out bench-results/history.jsonl --notes bench-results/release-notes.md
+          {
+            echo 'BENCH_NOTES<<EOF_NOTES'
+            cat bench-results/release-notes.md
+            echo 'EOF_NOTES'
+          } >> "$GITHUB_ENV"
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:

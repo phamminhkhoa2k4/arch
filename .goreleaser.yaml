@@ -22,6 +22,9 @@ archives:
     formats:
       - tar.gz
 
+release:
+  footer: "{{ .Env.BENCH_NOTES }}"
+
 checksum:
   name_template: "checksums.txt"
   algorithm: sha256
