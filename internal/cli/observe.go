@@ -62,14 +62,14 @@ func newObserveInstallCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			bin, err := os.Executable()
 			if err != nil {
-				return fmt.Errorf("không tìm thấy binary: %w", err)
+				return fmt.Errorf("cannot find binary: %w", err)
 			}
 			if resolved, rerr := filepath.EvalSymlinks(bin); rerr == nil {
 				bin = resolved
 			}
 			abs, err := filepath.Abs(dbPath)
 			if err != nil {
-				return fmt.Errorf("đường dẫn db: %w", err)
+				return fmt.Errorf("db path: %w", err)
 			}
 			inst := systemd.NewInstall(systemd.NewOSUnitWriter(), systemd.NewExecRunner())
 			return inst.InstallService(cmd.Context(),
@@ -95,7 +95,7 @@ func newObserveUninstallCmd() *cobra.Command {
 
 func runObserve(ctx context.Context, w io.Writer, dbPath string, interval time.Duration, daemon bool) error {
 	if interval <= 0 {
-		return fmt.Errorf("--interval phải lớn hơn 0")
+		return fmt.Errorf("--interval must be greater than 0")
 	}
 	st, err := store.Open(ctx, dbPath)
 	if err != nil {
@@ -131,14 +131,14 @@ func runObserve(ctx context.Context, w io.Writer, dbPath string, interval time.D
 // daemon at the newest entity ids (D3).
 func observeLoop(ctx context.Context, w io.Writer, s observer, interval time.Duration, daemon bool, load func() error) error {
 	if interval <= 0 {
-		return fmt.Errorf("--interval phải lớn hơn 0")
+		return fmt.Errorf("--interval must be greater than 0")
 	}
 	if err := load(); err != nil {
 		return err
 	}
 	// One start banner even in daemon mode: the journal then always
 	// shows when the sampler came up.
-	_, _ = fmt.Fprintf(w, "observe: interval %v — bắt đầu\n", interval)
+	_, _ = fmt.Fprintf(w, "observe: interval %v — starting\n", interval)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	rounds := 0
@@ -146,7 +146,7 @@ func observeLoop(ctx context.Context, w io.Writer, s observer, interval time.Dur
 		select {
 		case <-ctx.Done():
 			if !daemon {
-				_, _ = fmt.Fprintf(w, "observe: dừng sau %d lần mẫu\n", rounds)
+				_, _ = fmt.Fprintf(w, "observe: stopped after %d sample rounds\n", rounds)
 			}
 			return nil
 		case <-ticker.C:
@@ -155,16 +155,16 @@ func observeLoop(ctx context.Context, w io.Writer, s observer, interval time.Dur
 			// database lock, a reader error) must cost one round,
 			// never the whole daemon: log and try again next tick.
 			if err := load(); err != nil {
-				_, _ = fmt.Fprintf(w, "Error: tải listener: %v\n", err)
+				_, _ = fmt.Fprintf(w, "Error: loading listeners: %v\n", err)
 				continue
 			}
 			n, err := s.SampleOnce(ctx)
 			if err != nil {
-				_, _ = fmt.Fprintf(w, "Error: lấy mẫu: %v\n", err)
+				_, _ = fmt.Fprintf(w, "Error: sampling: %v\n", err)
 				continue
 			}
 			if !daemon {
-				_, _ = fmt.Fprintf(w, "lần mẫu %d: %d cặp\n", rounds, n)
+				_, _ = fmt.Fprintf(w, "sample round %d: %d pairs\n", rounds, n)
 			}
 		}
 	}

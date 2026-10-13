@@ -37,7 +37,7 @@ function table(headers, rows) {
 function rawRefCell(rawRef) {
   const td = el("td");
   if (!rawRef) return td;
-  const code = el("code", { class: "raw-ref", title: "Bấm để copy" }, rawRef);
+  const code = el("code", { class: "raw-ref", title: "Click to copy" }, rawRef);
   code.addEventListener("click", () => navigator.clipboard && navigator.clipboard.writeText(rawRef));
   td.append(code);
   return td;
@@ -88,15 +88,15 @@ if (tabHost) {
     ),
     blindspots: (d) => (d.blind_spots || []).length
       ? table(["Channel", "Reason"], d.blind_spots.map((b) => [b.Channel, b.Reason]))
-      : el("p", {}, "Không có vùng mù."),
+      : el("p", {}, "No blind spots."),
   };
   async function loadTab(name) {
-    tabHost.textContent = "Đang tải…";
+    tabHost.textContent = "Loading…";
     try {
       const data = await getJSON(`/api/components/${entityID}/${name}`);
       tabHost.replaceChildren(renderers[name](data));
     } catch (e) {
-      tabHost.textContent = "Lỗi: " + e.message;
+      tabHost.textContent = "Error: " + e.message;
     }
   }
   document.querySelectorAll(".tab").forEach((btn) => {
@@ -117,29 +117,29 @@ if (modal) {
   const genBtn = document.getElementById("modal-generate");
   document.getElementById("delete-check-btn").addEventListener("click", async () => {
     modal.classList.remove("hidden");
-    body.textContent = "Đang tải verdict…";
+    body.textContent = "Loading verdict…";
     genBtn.classList.add("hidden");
     try {
       const v = await getJSON(`/api/components/${entityID}/verdict`);
       body.replaceChildren();
       if (v.has_blockers) {
-        body.append(el("p", { class: "verdict-bad" }, "⛔ KHÔNG an toàn để xóa"));
+        body.append(el("p", { class: "verdict-bad" }, "⛔ NOT safe to delete"));
         const list = el("ul");
         for (const b of v.blockers) list.append(el("li", {}, `${b.code} ${b.text}`));
         body.append(list);
         genBtn.classList.add("hidden");
-        body.append(el("p", {}, "Gỡ toàn bộ blocker trước khi sinh kế hoạch."));
+        body.append(el("p", {}, "Remove all blockers before generating a plan."));
       } else {
         body.append(el("p", { class: v.plan_eligible ? "verdict-ok" : "" },
           `Verdict: ${v.state} · coverage ${v.coverage}`));
         if (v.plan_eligible) {
           genBtn.classList.remove("hidden");
         } else {
-          body.append(el("p", {}, "Verdict chưa đủ điều kiện — chỉ LIKELY_ORPHANED hoặc ORPHANED."));
+          body.append(el("p", {}, "Verdict not eligible — only LIKELY_ORPHANED or ORPHANED."));
         }
       }
     } catch (e) {
-      body.textContent = "Lỗi: " + e.message;
+      body.textContent = "Error: " + e.message;
     }
   });
   document.getElementById("modal-close").addEventListener("click", () => modal.classList.add("hidden"));
@@ -151,7 +151,7 @@ if (modal) {
       if (!r.ok) throw new Error(data.error || r.statusText);
       window.location.href = data.href;
     } catch (e) {
-      body.append(el("p", { class: "verdict-bad" }, "Lỗi: " + e.message));
+      body.append(el("p", { class: "verdict-bad" }, "Error: " + e.message));
     } finally {
       genBtn.disabled = false;
     }
@@ -163,7 +163,7 @@ const planHost = document.getElementById("plan-stages");
 if (planHost) {
   const planID = planHost.dataset.plan;
   async function loadPlan() {
-    planHost.textContent = "Đang tải…";
+    planHost.textContent = "Loading…";
     try {
       const data = await getJSON(`/api/plans/${planID}`);
       planHost.replaceChildren();
@@ -172,7 +172,7 @@ if (planHost) {
         row.append(el("span", { class: "name" }, (st.Status === "done" ? "✓ " : "○ ") + st.Stage));
         row.append(el("span", { class: "muted" }, st.ConfirmedAt || "pending"));
         if (st.Status !== "done") {
-          const btn = el("button", {}, "Đánh dấu hoàn tất");
+          const btn = el("button", {}, "Mark as done");
           btn.addEventListener("click", async () => {
             btn.disabled = true;
             try {
@@ -180,7 +180,7 @@ if (planHost) {
               if (!r.ok) throw new Error((await r.json()).error || r.statusText);
               await loadPlan();
             } catch (e) {
-              alert("Lỗi: " + e.message);
+              alert("Error: " + e.message);
               btn.disabled = false;
             }
           });
@@ -189,7 +189,7 @@ if (planHost) {
         planHost.append(row);
       }
     } catch (e) {
-      planHost.textContent = "Lỗi: " + e.message;
+      planHost.textContent = "Error: " + e.message;
     }
   }
   loadPlan();
@@ -204,7 +204,7 @@ if (svg) {
   const banner = document.getElementById("graph-banner");
   getJSON("/api/graph").then((g) => {
     if (g.truncated) {
-      banner.textContent = `Đồ thị có nhiều node — hiển thị ${g.nodes.length}/${g.total} node. Dùng Components để lọc chi tiết.`;
+      banner.textContent = `Graph has many nodes — showing ${g.nodes.length}/${g.total}. Use Components to filter.`;
       banner.classList.remove("hidden");
     }
     const byID = {};
@@ -244,7 +244,7 @@ if (svg) {
       svg.append(t);
     }
   }).catch((e) => {
-    banner.textContent = "Lỗi tải graph: " + e.message;
+    banner.textContent = "Error loading graph: " + e.message;
     banner.classList.remove("hidden");
   });
 }

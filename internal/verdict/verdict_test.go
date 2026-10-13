@@ -455,7 +455,7 @@ func TestCoverageEdgeCases(t *testing.T) {
 			t.Errorf("coverage=%s state=%s, want LOW/UNKNOWN", res.Coverage, res.State)
 		}
 		joined := strings.Join(res.Reasons, " ")
-		if !strings.Contains(joined, "cửa sổ quan sát 3 ngày") {
+		if !strings.Contains(joined, "observation window 3 days") {
 			t.Errorf("reasons must mention the short window: %v", res.Reasons)
 		}
 	})
@@ -485,7 +485,7 @@ func TestBlindSpotOnApplicableChannelForcesUnknown(t *testing.T) {
 	if res.State != StateUnknown {
 		t.Errorf("state = %s, want UNKNOWN despite full-looking coverage", res.State)
 	}
-	if len(res.Reasons) == 0 || !strings.Contains(strings.Join(res.Reasons, " "), "vùng mù") {
+	if len(res.Reasons) == 0 || !strings.Contains(strings.Join(res.Reasons, " "), "blind spot") {
 		t.Errorf("reasons must mention blindness: %v", res.Reasons)
 	}
 
@@ -729,7 +729,7 @@ func TestCyclePeriodLongerThanWindowForcesUnknown(t *testing.T) {
 		t.Errorf("state = %s, want UNKNOWN (monthly cadence cannot have run)", res.State)
 	}
 	joined := strings.Join(res.Reasons, "\n")
-	if !strings.Contains(joined, "chưa có cơ hội chạy trong cửa sổ quan sát") {
+	if !strings.Contains(joined, "never had a chance to run inside the window") {
 		t.Errorf("reasons must state the no-fair-chance trap: %v", res.Reasons)
 	}
 	if strings.Contains(joined, "ORPHAN") {
@@ -741,7 +741,7 @@ func TestCyclePeriodRuleSilentWithoutWindow(t *testing.T) {
 	in := coveredContainer(0, "", "")
 	in.Attributes["period_days"] = "30"
 	res := Compute(in, defaultRules(t), now)
-	if strings.Contains(strings.Join(res.Reasons, "\n"), "cơ hội chạy") {
+	if strings.Contains(strings.Join(res.Reasons, "\n"), "chance to run") {
 		t.Errorf("rule must stay silent at window_days 0: %v", res.Reasons)
 	}
 }
@@ -753,7 +753,7 @@ func TestCyclePeriodShorterThanWindowKeepsOrphanPath(t *testing.T) {
 	if res.State != StateOrphaned {
 		t.Errorf("state = %s, want ORPHANED (daily job ran many times)", res.State)
 	}
-	if strings.Contains(strings.Join(res.Reasons, "\n"), "cơ hội chạy") {
+	if strings.Contains(strings.Join(res.Reasons, "\n"), "chance to run") {
 		t.Errorf("no cycle trap expected: %v", res.Reasons)
 	}
 }
@@ -807,7 +807,7 @@ func TestReasonsCiteLastRunWhenProbed(t *testing.T) {
 	in.Attributes["last_run_at"] = "2026-10-01T02:00:00Z"
 	res := Compute(in, defaultRules(t), now)
 	joined := strings.Join(res.Reasons, "\n")
-	if !strings.Contains(joined, "lần chạy gần nhất: 2026-10-01T02:00:00Z") {
+	if !strings.Contains(joined, "last run: 2026-10-01T02:00:00Z") {
 		t.Errorf("orphan reasons must cite the last run: %v", res.Reasons)
 	}
 }
@@ -816,7 +816,7 @@ func TestReasonsSayNoRunSeenWhenProbedAndEmpty(t *testing.T) {
 	in := coveredContainer(37, "2026-09-01T00:00:00Z", "2026-10-08T00:00:00Z")
 	in.Attributes["last_run_at"] = ""
 	res := Compute(in, defaultRules(t), now)
-	if !strings.Contains(strings.Join(res.Reasons, "\n"), "không thấy lần chạy") {
+	if !strings.Contains(strings.Join(res.Reasons, "\n"), "no run seen") {
 		t.Errorf("reasons must state no run was seen: %v", res.Reasons)
 	}
 }
@@ -830,7 +830,7 @@ func TestShortWindowNeverReachesOrphanBand(t *testing.T) {
 		if res.State == StateOrphaned || res.State == StateLikelyOrphaned {
 			t.Errorf("days=%d state=%s, want no orphan band under threshold", days, res.State)
 		}
-		if !strings.Contains(strings.Join(res.Reasons, "\n"), "cửa sổ quan sát") {
+		if !strings.Contains(strings.Join(res.Reasons, "\n"), "observation window") {
 			t.Errorf("days=%d reasons must cite the window: %v", days, res.Reasons)
 		}
 	}
@@ -845,7 +845,7 @@ func TestShortWindowCapBeatsPermissiveFallback(t *testing.T) {
 	if res.State != StateUnknown {
 		t.Errorf("short window state = %s, want UNKNOWN despite fallback", res.State)
 	}
-	if !strings.Contains(strings.Join(res.Reasons, "\n"), "chưa đủ quan sát") {
+	if !strings.Contains(strings.Join(res.Reasons, "\n"), "observation window too short") {
 		t.Errorf("capped reasons must say the window is insufficient: %v", res.Reasons)
 	}
 
@@ -854,7 +854,7 @@ func TestShortWindowCapBeatsPermissiveFallback(t *testing.T) {
 	if res.State != StateOrphaned {
 		t.Errorf("full window state = %s, want ORPHANED (cap is window-driven)", res.State)
 	}
-	if strings.Contains(strings.Join(res.Reasons, "\n"), "chưa đủ quan sát") {
+	if strings.Contains(strings.Join(res.Reasons, "\n"), "observation window too short") {
 		t.Errorf("cap reason must not appear on a sufficient window: %v", res.Reasons)
 	}
 }

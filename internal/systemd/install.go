@@ -78,10 +78,10 @@ func NewInstall(w UnitWriter, r Runner) *Install {
 // keeps its previous state instead of half-installing.
 func (i *Install) InstallService(ctx context.Context, spec ServiceSpec) error {
 	if spec.Binary == "" || spec.DBPath == "" {
-		return fmt.Errorf("cần đường dẫn binary và db để tạo unit")
+		return fmt.Errorf("binary path and db path are required to create the unit")
 	}
 	if err := i.writer.WriteUnit(UnitPath, RenderUnit(spec)); err != nil {
-		return fmt.Errorf("ghi unit %s: %w", UnitPath, err)
+		return fmt.Errorf("write unit %s: %w", UnitPath, err)
 	}
 	if err := i.runner.Systemctl(ctx, "daemon-reload"); err != nil {
 		return fmt.Errorf("systemctl daemon-reload: %w", err)
@@ -100,7 +100,7 @@ func (i *Install) UninstallService(ctx context.Context) error {
 	_ = i.runner.Systemctl(ctx, "stop", UnitName)
 	_ = i.runner.Systemctl(ctx, "disable", UnitName)
 	if err := i.writer.RemoveUnit(UnitPath); err != nil {
-		return fmt.Errorf("xóa unit %s: %w", UnitPath, err)
+		return fmt.Errorf("remove unit %s: %w", UnitPath, err)
 	}
 	if err := i.runner.Systemctl(ctx, "daemon-reload"); err != nil {
 		return fmt.Errorf("systemctl daemon-reload: %w", err)

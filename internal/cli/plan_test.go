@@ -87,7 +87,7 @@ func TestPlanGenerateOrphaned(t *testing.T) {
 	if !strings.Contains(string(body), "# rollback:") {
 		t.Error("quarantine script missing rollback marker")
 	}
-	if !strings.Contains(buf.String(), "KHÔNG lệnh nào được tự chạy") {
+	if !strings.Contains(buf.String(), "no command is auto-executed") {
 		t.Errorf("missing no-exec notice:\n%s", buf.String())
 	}
 }
@@ -105,10 +105,10 @@ func TestPlanRefuseActive(t *testing.T) {
 		t.Errorf("exit code = %d, want %d", got, ExitAttention)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "KHÔNG sinh kế hoạch") || !strings.Contains(out, "ACTIVE") {
+	if !strings.Contains(out, "No cleanup plan generated") || !strings.Contains(out, "ACTIVE") {
 		t.Errorf("refusal message missing:\n%s", out)
 	}
-	if !strings.Contains(out, "gỡ blocker") {
+	if !strings.Contains(out, "remove the blockers") {
 		t.Errorf("ACTIVE refusal must suggest removing blockers:\n%s", out)
 	}
 }
@@ -147,7 +147,7 @@ func TestPlanStatusAndConfirm(t *testing.T) {
 	if !strings.Contains(out, "[✓] Candidate") || !strings.Contains(out, "[✓] Quarantined") {
 		t.Errorf("status missing confirmed marks:\n%s", out)
 	}
-	if !strings.Contains(out, "Giai đoạn hiện tại: Observed") {
+	if !strings.Contains(out, "Current stage: Observed") {
 		t.Errorf("status current stage wrong:\n%s", out)
 	}
 }

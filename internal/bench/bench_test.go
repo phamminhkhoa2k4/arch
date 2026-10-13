@@ -179,11 +179,11 @@ func TestBenchWarnBelowThreshold(t *testing.T) {
 	}
 	text := out.String()
 	for _, want := range []string{
-		"::warning title=benchmark::Listener có chủ",
-		"::warning title=benchmark::Chuỗi route đúng",
-		"không có chủ: " + listenerKey(8081),
-		"gt:listener-cache (không có trong scan)",
-		"chuỗi sai: chain-web",
+		"::warning title=benchmark::Listeners with owner",
+		"::warning title=benchmark::Correct route chains",
+		"no owner: " + listenerKey(8081),
+		"gt:listener-cache (missing from scan)",
+		"broken chain: chain-web",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("warn report missing %q:\n%s", want, text)
@@ -284,7 +284,7 @@ route_chains:
         owner:
           kind: container
           name: lab-web
-    reason: "route tĩnh"
+    reason: "static route"
 components:
   - id: container-lab-web
     kind: container
@@ -367,7 +367,7 @@ func TestMeasureIntegrityOnLabFixture(t *testing.T) {
 	if err := rep.Write(&buf); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if !strings.Contains(buf.String(), "Evidence có raw_ref") ||
+	if !strings.Contains(buf.String(), "Evidence with raw_ref") ||
 		!strings.Contains(buf.String(), "Overhead observe") {
 		t.Errorf("integrity section incomplete:\n%s", buf.String())
 	}
@@ -388,8 +388,8 @@ func TestParseObserveLog(t *testing.T) {
 	}
 	// Δticks=660 → 6.6s CPU over 600s wall = 1.1%; max RSS 51200 KB.
 	if !strings.Contains(got, "CPU 1.10%") || !strings.Contains(got, "51200 KB") ||
-		!strings.Contains(got, "2 mẫu") {
-		t.Errorf("summary = %q, want CPU 1.10%% · RAM tối đa 51200 KB (2 mẫu)", got)
+		!strings.Contains(got, "2 samples") {
+		t.Errorf("summary = %q, want CPU 1.10%% · max RAM 51200 KB (2 samples)", got)
 	}
 }
 

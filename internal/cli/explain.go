@@ -154,7 +154,7 @@ func printExplain(
 		return err
 	}
 	if len(evid) == 0 {
-		if _, err := fmt.Fprintln(w, "  (không có evidence)"); err != nil {
+		if _, err := fmt.Fprintln(w, "  (no evidence)"); err != nil {
 			return err
 		}
 	}
@@ -168,7 +168,7 @@ func printExplain(
 		}
 		// One copyable line per source so a reader can jump straight
 		// to the file, API call or command behind the fact.
-		if _, err := fmt.Fprintf(w, "    nguồn: %s\n", e.RawRef); err != nil {
+		if _, err := fmt.Fprintf(w, "    source: %s\n", e.RawRef); err != nil {
 			return err
 		}
 	}
@@ -181,7 +181,7 @@ func printExplain(
 		return err
 	}
 	if len(blinds) == 0 {
-		if _, err := fmt.Fprintln(w, "  (không có blind spot)"); err != nil {
+		if _, err := fmt.Fprintln(w, "  (no blind spots)"); err != nil {
 			return err
 		}
 	}
@@ -199,10 +199,10 @@ func printExplain(
 // of four empty groups.
 func printDependencies(w io.Writer, neighbors []store.NeighborRow) error {
 	if len(neighbors) == 0 {
-		_, err := fmt.Fprintln(w, "Phụ thuộc: (không có phụ thuộc nào được phát hiện)")
+		_, err := fmt.Fprintln(w, "Dependencies: (none discovered)")
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "Phụ thuộc (%d):\n", len(neighbors)); err != nil {
+	if _, err := fmt.Fprintf(w, "Dependencies (%d):\n", len(neighbors)); err != nil {
 		return err
 	}
 	for _, group := range []string{
@@ -219,7 +219,7 @@ func printDependencies(w io.Writer, neighbors []store.NeighborRow) error {
 			return err
 		}
 		if len(rows) == 0 {
-			if _, err := fmt.Fprintln(w, "    (không có)"); err != nil {
+			if _, err := fmt.Fprintln(w, "    (none)"); err != nil {
 				return err
 			}
 			continue
@@ -229,7 +229,7 @@ func printDependencies(w io.Writer, neighbors []store.NeighborRow) error {
 				r.Strength, r.EdgeKind, r.NeighborKind, r.NeighborName); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(w, "      nguồn: %s %s\n", r.Channel, r.RawRef); err != nil {
+			if _, err := fmt.Fprintf(w, "      source: %s %s\n", r.Channel, r.RawRef); err != nil {
 				return err
 			}
 		}

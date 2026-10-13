@@ -58,13 +58,13 @@ func TestBuildContainerRemovedSections(t *testing.T) {
 	rm := stageByName(t, p, "Removed")
 	for _, want := range []string{
 		"docker rm lab-old-app",
-		"# --- image (riêng biệt, KHÔNG gộp với container) ---",
+		"# --- image (separate — DO NOT merge with the container step) ---",
 		"docker rmi old/app:1.2",
 		"# rollback: docker pull old/app:1.2",
-		"# --- volume (riêng biệt; chỉ khi đã backup tay) ---",
+		"# --- volume (separate; only after your manual backup) ---",
 		"# docker volume rm oldapp-data",
 		"# docker volume rm oldapp-cache",
-		"# Volume oldapp-data:/data có thể còn dữ liệu",
+		"# Volume oldapp-data:/data may still hold data",
 	} {
 		if !strings.Contains(rm.Script, want) {
 			t.Errorf("removed script missing %q:\n%s", want, rm.Script)
@@ -77,7 +77,7 @@ func TestBuildContainerRemovedSections(t *testing.T) {
 	if !strings.Contains(arch.Script, "archive-$(date") {
 		t.Errorf("archive script must create timestamped dir:\n%s", arch.Script)
 	}
-	if !strings.Contains(arch.Script, "xác nhận đã backup") {
+	if !strings.Contains(arch.Script, "confirm your backup") {
 		t.Errorf("archive script must warn about data volumes:\n%s", arch.Script)
 	}
 }
@@ -113,14 +113,14 @@ func TestRenderMarkdown(t *testing.T) {
 	p := Build(containerComp())
 	md := RenderMarkdown(p, Meta{
 		VerdictState: "ORPHANED", Coverage: "HIGH",
-		WindowLine:  "2026-10-01T00:00:00Z → 2026-10-10T00:00:00Z (9 ngày)",
+		WindowLine:  "2026-10-01T00:00:00Z → 2026-10-10T00:00:00Z (9 days)",
 		GeneratedAt: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC),
 	})
 	for _, want := range []string{
-		"# Kế hoạch dọn dẹp — lab-old-app (container)",
+		"# Cleanup plan — lab-old-app (container)",
 		"Verdict: **ORPHANED**",
-		"## ⚠ Volume dữ liệu — bắt buộc backup tay",
-		"Điều kiện qua cổng (gate)",
+		"## ⚠ Data volumes — manual backup required",
+		"Gate condition",
 		"06-verified.sh",
 	} {
 		if !strings.Contains(md, want) {

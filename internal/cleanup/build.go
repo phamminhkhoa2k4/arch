@@ -21,44 +21,44 @@ func Build(c Component) Plan {
 	p.Stages = []Stage{
 		{
 			Name:      "Candidate",
-			Action:    fmt.Sprintf("Đọc toàn bộ kế hoạch này, chạy `archaeologist delete-check %s` và xác nhận verdict vẫn là orphan, không có blocker mới.", ref),
-			Gate:      "delete-check trả về LIKELY_ORPHANED hoặc ORPHANED với danh sách blockers rỗng.",
-			Confirmer: "Operator tự xác nhận sau khi đọc (plan confirm <component> Candidate).",
+			Action:    fmt.Sprintf("Read this whole plan, run `archaeologist delete-check %s` and confirm the verdict is still orphan with no new blockers.", ref),
+			Gate:      "delete-check returns LIKELY_ORPHANED or ORPHANED with an empty blocker list.",
+			Confirmer: "Operator confirms after reading (plan confirm <component> Candidate).",
 			Script:    candidateScript(ref),
 		},
 		{
 			Name:      "Quarantined",
 			Action:    quarantineAction(c),
-			Gate:      "Sau 7 ngày cách ly: không complain/log/gọi tới mới; chạy lại delete-check vẫn không có blocker.",
-			Confirmer: "Operator đối chiếu log + delete-check rồi confirm.",
+			Gate:      "After 7 days of quarantine: no new complain/log/call traffic; delete-check still shows no blockers.",
+			Confirmer: "Operator cross-checks logs + delete-check, then confirms.",
 			Script:    quarantineScript(c),
 		},
 		{
 			Name:      "Observed",
-			Action:    "Không làm gì thêm — để observe daemon quan sát 14 ngày sau khi cách ly.",
-			Gate:      "Cửa sổ quan sát ≥ 14 ngày, không có activity mới, verdict vẫn orphan.",
+			Action:    "Do nothing more — let the observe daemon watch for 14 days after quarantine.",
+			Gate:      "Observation window >= 14 days, no new activity, verdict still orphan.",
 			Confirmer: "Re-scan + delete-check (operator).",
 			Script:    observedScript(ref),
 		},
 		{
 			Name:      "Archived",
 			Action:    archiveAction(c),
-			Gate:      "Thư mục archive-<timestamp> đã tồn tại và đầy đủ file; mọi volume dữ liệu đã được backup tay.",
-			Confirmer: "Operator xác nhận backup (bao gồm volume) trước khi qua Removed.",
+			Gate:      "The archive-<timestamp> directory exists with every file; all data volumes have been backed up by hand.",
+			Confirmer: "Operator confirms the backup (including volumes) before moving to Removed.",
 			Script:    archiveScript(c, p.VolumeWarnings),
 		},
 		{
 			Name:      "Removed",
 			Action:    removedAction(c),
-			Gate:      "delete-check trả về 'không tìm thấy component' trên scan mới.",
-			Confirmer: "Operator chạy delete-check sau khi gỡ.",
+			Gate:      "delete-check returns 'component not found' on a fresh scan.",
+			Confirmer: "Operator runs delete-check after removal.",
 			Script:    removedScript(c),
 		},
 		{
 			Name:      "Verified",
-			Action:    "Chạy `archaeologist scan` mới và `delete-check` lại toàn bộ khu vực: component đã biến mất, không để lại side-effect (route chết, cron lỗi, log lỗi).",
-			Gate:      "Scan mới không còn entity này và không có finding mới liên quan.",
-			Confirmer: "Operator + kết quả scan mới.",
+			Action:    "Run a fresh `archaeologist scan` and `delete-check` over the whole area: the component is gone and leaves no side effects (dead routes, broken cron, error logs).",
+			Gate:      "A fresh scan no longer contains the entity and no new related findings appear.",
+			Confirmer: "Operator + fresh scan results.",
 			Script:    verifiedScript(ref),
 		},
 	}
@@ -112,15 +112,15 @@ func observedScript(ref string) string {
 func quarantineAction(c Component) string {
 	switch c.Kind {
 	case "systemd_unit", "timer":
-		return fmt.Sprintf("Tạm dừng và không cho start cùng boot: `systemctl disable --now %s`.", c.Name)
+		return fmt.Sprintf("Stop and prevent start on boot: `systemctl disable --now %s`.", c.Name)
 	case "container":
-		return fmt.Sprintf("Dừng container, giữ nguyên image/volume: `docker stop %s`.", c.Name)
+		return fmt.Sprintf("Stop the container, keep image/volumes: `docker stop %s`.", c.Name)
 	case "cron_job":
-		return fmt.Sprintf("Vô hiệu hoá job: di chuyển file cron sang `.disabled` (%s).", attrOr(c.Attrs, "file", "không rõ file"))
+		return fmt.Sprintf("Disable the job: move the cron file to `.disabled` (%s).", attrOr(c.Attrs, "file", "unknown file"))
 	case "nginx_route":
-		return "Comment toàn bộ block route trong config nginx (giữ lại file đã backup ở Archived); reload nginx."
+		return "Comment out the whole route block in the nginx config (keep the backed-up copy from Archived); reload nginx."
 	default:
-		return fmt.Sprintf("Cách ly %s theo cơ chế của loại này — xem lệnh trong script.", c.Kind)
+		return fmt.Sprintf("Quarantine %s using its kind's mechanism — see the script for commands.", c.Kind)
 	}
 }
 
@@ -174,9 +174,9 @@ func quarantineScript(c Component) string {
 }
 
 func archiveAction(c Component) string {
-	base := "Chạy script Archived để `cp` cấu hình hiện tại (unit file / config / compose / danh sách image) vào thư mục `archive-<UTC-timestamp>` ngay bên cạnh plan."
+	base := "Run the Archived script to `cp` the current config (unit file / config / compose / image list) into the `archive-<UTC-timestamp>` directory right next to the plan."
 	if len(volumeWarnings(c)) > 0 {
-		base += " BẮT BUỘC backup tay toàn bộ volume dữ liệu trước khi tiếp tục — tool không tự xóa và không tự backup dữ liệu."
+		base += " You MUST back up every data volume by hand before continuing — the tool neither deletes nor backs up data for you."
 	}
 	return base
 }
@@ -221,25 +221,25 @@ func archiveScript(c Component, warnings []string) string {
 	warn := []string{"", "# Data volumes are NEVER deleted automatically — confirm your backup first."}
 	for _, w := range warnings {
 		warn = append(warn,
-			fmt.Sprintf("echo 'Volume %s có thể còn dữ liệu — xác nhận đã backup trước khi tiếp tục' >&2", w),
+			fmt.Sprintf("echo 'Volume %s may still hold data — confirm your backup before continuing' >&2", w),
 			fmt.Sprintf("# manual backup of %s happens here; no command is generated", w))
 	}
-	tail := []string{"", "echo \"Đã archive vào $ARCHIVE — xác nhận trước khi qua Removed.\""}
+	tail := []string{"", "echo \"Archived into $ARCHIVE — confirm before moving to Removed.\""}
 	return strings.Join(append(append(head, body...), append(warn, tail...)...), "\n") + "\n"
 }
 
 func removedAction(c Component) string {
 	switch c.Kind {
 	case "container":
-		return "Gỡ theo đúng 3 mục riêng biệt: container → image → volume (mỗi lệnh một rollback riêng; volume chỉ xóa khi đã xác nhận backup)."
+		return "Remove the three targets separately: container -> image -> volume (each command has its own rollback; delete a volume only after confirming the backup)."
 	case "systemd_unit", "timer":
-		return "Xóa unit file + daemon-reload (chỉ sau khi đã archive)."
+		return "Delete the unit file + daemon-reload (only after archiving)."
 	case "cron_job":
-		return "Xóa file cron đã disable (chỉ sau khi đã archive)."
+		return "Delete the disabled cron file (only after archiving)."
 	case "nginx_route":
-		return "Xóa vĩnh viễn block route đã comment trong config (chỉ sau khi đã archive)."
+		return "Permanently delete the commented-out route block from the config (only after archiving)."
 	default:
-		return fmt.Sprintf("Gỡ %s bằng cơ chế của loại này — xem script.", c.Kind)
+		return fmt.Sprintf("Remove %s using its kind's mechanism — see the script.", c.Kind)
 	}
 }
 
@@ -257,33 +257,33 @@ func removedScript(c Component) string {
 		vols := volumeWarnings(c)
 		body = []string{
 			fmt.Sprintf("docker rm %s", c.Name),
-			"# rollback: docker run ... (không có trực tiếp — dựng lại từ compose/inspect đã archive)",
+			"# rollback: no direct command — rebuild from the archived compose/inspect",
 			"",
-			"# --- image (riêng biệt, KHÔNG gộp với container) ---",
+			"# --- image (separate — DO NOT merge with the container step) ---",
 		}
 		if img != "" {
 			body = append(body,
 				fmt.Sprintf("docker rmi %s", img),
 				fmt.Sprintf("# rollback: docker pull %s", img))
 		} else {
-			body = append(body, "# image unknown — lấy từ archive/image-*.txt rồi rmi tay")
+			body = append(body, "# image unknown — read archive/image-*.txt and rmi by hand")
 		}
-		body = append(body, "", "# --- volume (riêng biệt; chỉ khi đã backup tay) ---")
+		body = append(body, "", "# --- volume (separate; only after your manual backup) ---")
 		if len(vols) == 0 {
 			body = append(body, "# no named volumes attached")
 		}
 		for _, v := range vols {
 			body = append(body,
-				fmt.Sprintf("# Volume %s có thể còn dữ liệu — xác nhận đã backup trước khi bỏ comment dòng sau:", v),
+				fmt.Sprintf("# Volume %s may still hold data — confirm your backup before uncommenting the next line:", v),
 				fmt.Sprintf("# docker volume rm %s", volumeName(v)),
-				"# rollback: không có — khôi phục từ backup bạn đã xác nhận ở Archived")
+				"# rollback: none — restore from the backup you confirmed at Archived")
 		}
 	case "systemd_unit", "timer":
 		body = []string{
 			fmt.Sprintf("systemctl disable --now %s 2>/dev/null || true", c.Name),
 			fmt.Sprintf("rm -f /etc/systemd/system/%s /lib/systemd/system/%s 2>/dev/null || true", c.Name, c.Name),
 			"systemctl daemon-reload",
-			fmt.Sprintf("# rollback: copy %s.txt từ archive/ về /etc/systemd/system/ rồi daemon-reload + enable --now", c.Name),
+			fmt.Sprintf("# rollback: copy %s.txt from archive/ back to /etc/systemd/system/ then daemon-reload + enable --now", c.Name),
 		}
 	case "cron_job":
 		f := attrOr(c.Attrs, "file", "")
@@ -293,14 +293,14 @@ func removedScript(c Component) string {
 		} else {
 			body = []string{
 				fmt.Sprintf("rm -f %q %q 2>/dev/null || true", f, f+".disabled"),
-				fmt.Sprintf("# rollback: cp từ archive/ về %q rồi xác nhận lại", f),
+				fmt.Sprintf("# rollback: cp %q back from archive/ then re-verify", f),
 			}
 		}
 	case "nginx_route":
 		body = []string{
-			"# Xóa vĩnh viễn block route trong config (sau khi đã có bản archive) rồi:",
+			"# Permanently delete the route block from the config (after the archive exists), then:",
 			"nginx -t && systemctl reload nginx",
-			"# rollback: restore file nginx từ archive/ rồi reload",
+			"# rollback: restore the nginx file from archive/ then reload",
 		}
 	default:
 		body = []string{fmt.Sprintf("# no standard removal command for kind %q", c.Kind)}

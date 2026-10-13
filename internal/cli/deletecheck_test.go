@@ -135,15 +135,15 @@ func TestDeleteCheckActiveBlockerTracesEvidence(t *testing.T) {
 		t.Fatalf("delete-check: %v", err)
 	}
 	requireSectionOrder(t, out,
-		"Trạng thái:", "Cửa sổ quan sát:", "Evidence coverage:",
-		"⛔ Blockers:", "⚠ Tín hiệu không-dùng:", "? Vùng mù:", "Hành động gợi ý:")
+		"State:", "Observation window:", "Evidence coverage:",
+		"⛔ Blockers:", "⚠ Non-delete signals:", "? Blind spots:", "Suggested action:")
 	requireCleanVerdictText(t, out)
 
 	for _, want := range []string{
-		"Trạng thái: ACTIVE",
+		"State: ACTIVE",
 		"B3",
 		"depends_on",
-		"⛔ KHÔNG an toàn để xóa",
+		"⛔ NOT safe to delete",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
@@ -216,19 +216,19 @@ coverage:
 		t.Fatalf("delete-check ORPHANED err = %v, want attention exit", err)
 	}
 	requireSectionOrder(t, out,
-		"Trạng thái:", "Cửa sổ quan sát:", "Evidence coverage:",
-		"⛔ Blockers:", "⚠ Tín hiệu không-dùng:", "? Vùng mù:",
-		"Lý do:", "Hành động gợi ý:")
+		"State:", "Observation window:", "Evidence coverage:",
+		"⛔ Blockers:", "⚠ Non-delete signals:", "? Blind spots:",
+		"Reasons:", "Suggested action:")
 	requireCleanVerdictText(t, out)
 
 	for _, want := range []string{
-		"Trạng thái: ORPHANED",
-		"Evidence coverage: HIGH — thiếu: (không)",
-		"⛔ Blockers: (không có)",
-		"⚠ Tín hiệu không-dùng: (không có)",
-		"? Vùng mù: (không có)",
-		"không có blocker cứng nào",
-		"cửa sổ quan sát",
+		"State: ORPHANED",
+		"Evidence coverage: HIGH — missing: (none)",
+		"⛔ Blockers: (none)",
+		"⚠ Non-delete signals: (none)",
+		"? Blind spots: (none)",
+		"no hard blockers among the 6 kinds",
+		"observation window",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
@@ -282,7 +282,7 @@ coverage:
 	if err == nil || exitCodeOf(err) != ExitAttention {
 		t.Fatalf("delete-check A err = %v, want attention exit", err)
 	}
-	if !strings.Contains(outA, "Trạng thái: ORPHANED") {
+	if !strings.Contains(outA, "State: ORPHANED") {
 		t.Errorf("rules A must yield ORPHANED:\n%s", outA)
 	}
 
@@ -290,7 +290,7 @@ coverage:
 	if err == nil || exitCodeOf(err) != ExitAttention {
 		t.Fatalf("delete-check B err = %v, want attention exit", err)
 	}
-	for _, want := range []string{"Trạng thái: UNKNOWN", "Evidence coverage: LOW", "thiếu: docker_log"} {
+	for _, want := range []string{"State: UNKNOWN", "Evidence coverage: LOW", "missing: docker_log"} {
 		if !strings.Contains(outB, want) {
 			t.Errorf("rules B output missing %q:\n%s", want, outB)
 		}
@@ -371,7 +371,7 @@ func TestDeleteCheckReferenceErrors(t *testing.T) {
 	}
 
 	if _, err := runExplainCmd(t, "delete-check", "no-such", "--db", db); err == nil ||
-		!strings.Contains(err.Error(), "không tìm thấy") {
+		!strings.Contains(err.Error(), "no component matches") {
 		t.Errorf("unknown ref err = %v", err)
 	}
 	_, err := runExplainCmd(t, "delete-check", "/web/", "--db", db)
@@ -396,12 +396,12 @@ func TestPrintDeleteCheckShowsWindowInterval(t *testing.T) {
 	res := verdict.Result{
 		State:  verdict.StateUnknown,
 		Window: verdict.Window{Start: "2026-09-01T00:00:00Z", End: "2026-10-08T00:00:00Z", Days: 37, Source: "observations"},
-		Action: "chưa đủ bằng chứng",
+		Action: "not enough evidence",
 	}
 	if err := printDeleteCheck(&buf, res); err != nil {
 		t.Fatalf("printDeleteCheck: %v", err)
 	}
-	want := "Cửa sổ quan sát: 2026-09-01T00:00:00Z → 2026-10-08T00:00:00Z (37 ngày)"
+	want := "Observation window: 2026-09-01T00:00:00Z → 2026-10-08T00:00:00Z (37 days)"
 	if !strings.Contains(buf.String(), want) {
 		t.Errorf("output missing %q:\n%s", want, buf.String())
 	}

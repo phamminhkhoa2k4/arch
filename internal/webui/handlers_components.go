@@ -76,7 +76,7 @@ func listFilter(r *http.Request) store.ListFilter {
 func pathID(r *http.Request) (int64, error) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		return 0, errBadRequest("id phải là số nguyên dương")
+		return 0, errBadRequest("id must be a positive integer")
 	}
 	return id, nil
 }
@@ -90,12 +90,12 @@ func (s *Server) entityOr404(w http.ResponseWriter, r *http.Request) (store.Enti
 	}
 	ent, err := s.st.EntityByID(r.Context(), id)
 	if err != nil {
-		httpError(w, http.StatusNotFound, "entity không tồn tại")
+		httpError(w, http.StatusNotFound, "entity does not exist")
 		return store.EntityRow{}, false
 	}
 	// The detail page only shows entities of the latest scan.
 	if ent.ID == 0 {
-		httpError(w, http.StatusNotFound, "entity không thuộc scan mới nhất")
+		httpError(w, http.StatusNotFound, "entity does not belong to the latest scan")
 		return store.EntityRow{}, false
 	}
 	return ent, true
@@ -193,7 +193,7 @@ func (s *Server) handleDetailTab(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"blind_spots": rows})
 	default:
-		httpError(w, http.StatusNotFound, "tab không tồn tại: "+tab)
+		httpError(w, http.StatusNotFound, "unknown tab: "+tab)
 	}
 }
 
@@ -226,12 +226,12 @@ func (s *Server) handleGeneratePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(rec.Blockers) > 0 {
-		httpError(w, http.StatusConflict, "verdict có blocker — gỡ blocker trước khi sinh kế hoạch")
+		httpError(w, http.StatusConflict, "verdict has blockers — remove them before generating a plan")
 		return
 	}
 	if !planEligible(rec.State) {
 		httpError(w, http.StatusConflict,
-			"verdict "+rec.State+" không đủ điều kiện — chỉ LIKELY_ORPHANED hoặc ORPHANED")
+			"verdict "+rec.State+" is not eligible — only LIKELY_ORPHANED or ORPHANED")
 		return
 	}
 	planID, err := s.st.EnsurePlan(r.Context(), ent.ID)

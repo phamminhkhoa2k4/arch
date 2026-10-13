@@ -107,11 +107,11 @@ func TestExplainShowsEvidenceAndBlindSpots(t *testing.T) {
 		"Evidence (1)",
 		"in_use",
 		"nginx_access_log",
-		"nguồn: /var/log/nginx/lab_access.log:12",
+		"source: /var/log/nginx/lab_access.log:12",
 		"last_request_at=2026-10-07T09:58:00Z",
 		// No edges on this route: the graph section says so instead
 		// of printing four empty groups.
-		"không có phụ thuộc nào được phát hiện",
+		"Dependencies: (none discovered)",
 		"Blind spots (1)",
 		"log_retention_short",
 		"retention_days=7",
@@ -177,7 +177,7 @@ func TestExplainShowsDependencyGroups(t *testing.T) {
 		t.Fatalf("explain: %v", err)
 	}
 	for _, want := range []string{
-		"Phụ thuộc (4):",
+		"Dependencies (4):",
 		"incoming (1):",
 		"[deterministic] listens_on — listener lab-web-sock",
 		"outgoing (1):",
@@ -187,7 +187,7 @@ func TestExplainShowsDependencyGroups(t *testing.T) {
 		"[strong_heuristic] deployed_by — ci_job build-7",
 		"scheduled_by (1):",
 		"[deterministic] scheduled_by — timer lab-watchdog.timer",
-		"nguồn: test-ch /etc/x:1",
+		"source: test-ch /etc/x:1",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
@@ -208,7 +208,7 @@ func TestExplainNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("unknown reference must fail")
 	}
-	if !strings.Contains(err.Error(), "không tìm thấy") {
+	if !strings.Contains(err.Error(), "no component matches") && !strings.Contains(err.Error(), "not found") {
 		t.Errorf("err = %v", err)
 	}
 }

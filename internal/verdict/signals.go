@@ -8,7 +8,7 @@ import (
 	"archaeologist/internal/rules"
 )
 
-// signals derives the "⚠ tín hiệu không-dùng" list from neutral
+// signals derives the "⚠ non-delete signals" list from neutral
 // evidence and attributes. Signals never override a blocker (INV-2);
 // they only push an unblocked entity toward orphan states.
 func signals(in Input, r rules.Rules, now time.Time) []Item {
@@ -29,7 +29,7 @@ func signals(in Input, r rules.Rules, now time.Time) []Item {
 			if err == nil && age > r.Thresholds.NoActivityDays {
 				add("S_mtime", Item{
 					Code:       "S1",
-					Text:       fmt.Sprintf("file không thay đổi %d ngày (no_activity_days=%d)", age, r.Thresholds.NoActivityDays),
+					Text:       fmt.Sprintf("file unchanged for %d days (no_activity_days=%d)", age, r.Thresholds.NoActivityDays),
 					EvidenceID: e.ID,
 					RawRef:     e.RawRef,
 				})
@@ -42,7 +42,7 @@ func signals(in Input, r rules.Rules, now time.Time) []Item {
 			if days, ok := daysSince(ts, now); ok && days > r.Thresholds.NoDeployDays {
 				add("S_deploy", Item{
 					Code:       "S2",
-					Text:       fmt.Sprintf("không deploy mới %d ngày (no_deploy_days=%d)", days, r.Thresholds.NoDeployDays),
+					Text:       fmt.Sprintf("no new deploy for %d days (no_deploy_days=%d)", days, r.Thresholds.NoDeployDays),
 					EvidenceID: e.ID,
 					RawRef:     e.RawRef,
 				})
@@ -51,7 +51,7 @@ func signals(in Input, r rules.Rules, now time.Time) []Item {
 			if st := e.Value["active_state"]; st != "" && st != "active" {
 				add("S_unit_state", Item{
 					Code:       "S3",
-					Text:       fmt.Sprintf("unit không active (active_state=%s)", st),
+					Text:       fmt.Sprintf("unit is not active (active_state=%s)", st),
 					EvidenceID: e.ID,
 					RawRef:     e.RawRef,
 				})
@@ -60,7 +60,7 @@ func signals(in Input, r rules.Rules, now time.Time) []Item {
 			if st := e.Value["state"]; st != "" && st != "running" {
 				add("S_container_state", Item{
 					Code:       "S4",
-					Text:       fmt.Sprintf("container không ở trạng thái running (state=%s)", st),
+					Text:       fmt.Sprintf("container is not running (state=%s)", st),
 					EvidenceID: e.ID,
 					RawRef:     e.RawRef,
 				})

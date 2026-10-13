@@ -69,7 +69,7 @@ func TestDoctorAllSourcesAvailable(t *testing.T) {
 	if !ok {
 		t.Error("runDoctor must report available")
 	}
-	if !strings.Contains(buf.String(), "✅ Tất cả nguồn khả dụng") {
+	if !strings.Contains(buf.String(), "✅ All sources available") {
 		t.Errorf("missing success line:\n%s", buf.String())
 	}
 }
@@ -79,12 +79,12 @@ func TestDoctorListsGapsWithHints(t *testing.T) {
 	buf := new(bytes.Buffer)
 	ok := runDoctor(buf, []doctorCheck{
 		{
-			fail: "Không đọc được process của user khác",
-			hint: "chạy bằng sudo/root",
+			fail: "Cannot read other users' processes",
+			hint: "run with sudo/root",
 			run:  func() error { return errDenied },
 		},
 		{
-			fail: "Không truy cập Docker socket",
+			fail: "Cannot access the Docker socket",
 			hint: "sudo usermod -aG docker $USER",
 			run:  func() error { return errDenied },
 		},
@@ -98,17 +98,17 @@ func TestDoctorListsGapsWithHints(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"Không đọc được process của user khác",
-		"Không truy cập Docker socket",
-		"Gợi ý: chạy bằng sudo/root",
-		"Gợi ý: sudo usermod -aG docker $USER",
+		"Cannot read other users' processes",
+		"Cannot access the Docker socket",
+		"Hint: run with sudo/root",
+		"Hint: sudo usermod -aG docker $USER",
 		"✓ Log paths",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "✅ Tất cả nguồn khả dụng") {
+	if strings.Contains(out, "✅ All sources available") {
 		t.Errorf("success line must not appear when gaps exist:\n%s", out)
 	}
 }

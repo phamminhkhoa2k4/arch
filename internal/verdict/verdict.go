@@ -150,7 +150,7 @@ func Compute(in Input, r rules.Rules, now time.Time) Result {
 	case len(res.Blockers) > 0:
 		res.State = StateActive
 		res.Coverage = coverageLevel(len(checked), len(applicable), res.WindowOK, r)
-		res.Action = fmt.Sprintf("⛔ KHÔNG an toàn để xóa — %d blocker cứng", len(res.Blockers))
+		res.Action = fmt.Sprintf("⛔ NOT safe to delete — %d hard blockers", len(res.Blockers))
 		return res
 	}
 
@@ -162,7 +162,7 @@ func Compute(in Input, r rules.Rules, now time.Time) Result {
 		res.Coverage = coverageLevel(len(checked), len(applicable), res.WindowOK, r)
 		res.Reasons = []string{
 			reason,
-			fmt.Sprintf("evidence coverage %s — thiếu: %s", res.Coverage, missingOrNone(missing)),
+			fmt.Sprintf("evidence coverage %s — missing: %s", res.Coverage, missingOrNone(missing)),
 		}
 		res.Action = actionFor(res.State)
 		return res
@@ -173,8 +173,8 @@ func Compute(in Input, r rules.Rules, now time.Time) Result {
 		res.State = StateUnknown
 		res.Coverage = coverageLevel(len(checked), len(applicable), res.WindowOK, r)
 		res.Reasons = []string{
-			"vùng mù trên kênh quan trọng — không được kết luận “không dùng”",
-			fmt.Sprintf("evidence coverage %s — thiếu: %s", res.Coverage, missingOrNone(missing)),
+			"blind spot on a critical channel — cannot conclude \"not in use\"",
+			fmt.Sprintf("evidence coverage %s — missing: %s", res.Coverage, missingOrNone(missing)),
 		}
 		res.Action = actionFor(res.State)
 		return res
@@ -206,7 +206,7 @@ func Compute(in Input, r rules.Rules, now time.Time) Result {
 		res.Reasons = reasons(in, res, r, len(checked), len(applicable))
 		if capped {
 			res.Reasons = append(res.Reasons,
-				"chưa đủ quan sát — không được kết luận LIKELY_ORPHANED/ORPHANED")
+				"observation window too short — LIKELY_ORPHANED/ORPHANED not allowed")
 		}
 		res.Action = actionFor(res.State)
 	}
@@ -232,7 +232,7 @@ func cyclePeriodUnknown(in Input) (string, bool) {
 	if err != nil || period <= float64(in.Window.Days) {
 		return "", false
 	}
-	return fmt.Sprintf("chu kỳ %s ngày > cửa sổ quan sát %d ngày — chưa có cơ hội chạy trong cửa sổ quan sát",
+	return fmt.Sprintf("cadence %s days > observation window %d days — never had a chance to run inside the window",
 		raw, in.Window.Days), true
 }
 
@@ -268,24 +268,24 @@ func coverageLevel(checked, applicable int, windowOK bool, r rules.Rules) string
 // reasons builds the multi-line justification required for non-ACTIVE
 // states.
 func reasons(in Input, res Result, r rules.Rules, checked, applicable int) []string {
-	out := []string{"không có blocker cứng nào trong 6 loại"}
+	out := []string{"no hard blockers among the 6 kinds"}
 	if res.WindowOK {
-		out = append(out, fmt.Sprintf("cửa sổ quan sát %d ngày đạt ngưỡng %d",
+		out = append(out, fmt.Sprintf("observation window %d days meets the %d-day threshold",
 			in.Window.Days, r.Thresholds.ObservationWindowDays))
 	} else {
-		out = append(out, fmt.Sprintf("cửa sổ quan sát %d ngày chưa đạt ngưỡng %d",
+		out = append(out, fmt.Sprintf("observation window %d days below the %d-day threshold",
 			in.Window.Days, r.Thresholds.ObservationWindowDays))
 	}
-	out = append(out, fmt.Sprintf("evidence coverage %s (%d/%d kênh áp dụng — thiếu: %s)",
+	out = append(out, fmt.Sprintf("evidence coverage %s (%d/%d applicable channels — missing: %s)",
 		res.Coverage, checked, applicable, missingOrNone(res.Missing)))
 	// Concrete schedule-run evidence when the scan probed it (cron and
 	// timer entities): the orphan bands must cite when the job last ran
 	// or that no run was seen at all.
 	if seen, probed := in.Attributes["last_run_at"]; probed {
 		if seen == "" {
-			out = append(out, "không thấy lần chạy trong journal/systemd")
+			out = append(out, "no run seen in journal/systemd")
 		} else {
-			out = append(out, fmt.Sprintf("lần chạy gần nhất: %s", seen))
+			out = append(out, fmt.Sprintf("last run: %s", seen))
 		}
 	}
 	return out
@@ -294,17 +294,17 @@ func reasons(in Input, res Result, r rules.Rules, checked, applicable int) []str
 func actionFor(state string) string {
 	switch state {
 	case StateLikelyOrphaned:
-		return `ứng viên dọn dẹp — chạy "archaeologist plan <component>" để lập kế hoạch có rollback`
+		return `cleanup candidate — run "archaeologist plan <component>" to build a rollback-capable plan`
 	case StateOrphaned:
-		return `có thể dọn — chạy "archaeologist plan <component>" trước khi xóa`
+		return `safe to clean — run "archaeologist plan <component>" before deleting`
 	default:
-		return "chưa đủ bằng chứng — mở rộng quan sát (observe) hoặc cấp quyền rồi chạy lại"
+		return "not enough evidence — extend observation (observe) or grant permissions, then re-run"
 	}
 }
 
 func missingOrNone(missing []string) string {
 	if len(missing) == 0 {
-		return "(không)"
+		return "(none)"
 	}
 	out := ""
 	for i, m := range missing {

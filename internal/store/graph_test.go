@@ -126,7 +126,7 @@ func TestNeighborRowsGroups(t *testing.T) {
 }
 
 // An entity with no incident edges yields an isolated result so explain
-// can print the "không có phụ thuộc" line.
+// can print the "no dependencies discovered" line.
 func TestNeighborRowsIsolated(t *testing.T) {
 	s := openTemp(t)
 	k := newScan(t, s)

@@ -26,27 +26,27 @@ type doctorCheck struct {
 func realChecks() []doctorCheck {
 	return []doctorCheck{
 		{
-			pass: "Process của user khác (đọc /proc/<pid>/fd)",
-			fail: "Không đọc được process của user khác",
-			hint: "chạy bằng sudo/root — không mapping được listener → PID cho process của user khác",
+			pass: "Foreign-user processes (read /proc/<pid>/fd)",
+			fail: "Cannot read other users' processes",
+			hint: "run with sudo/root — listener → PID mapping fails for other users' processes otherwise",
 			run:  checkForeignProcFD,
 		},
 		{
 			pass: "Docker socket",
-			fail: "Không truy cập Docker socket",
-			hint: "sudo usermod -aG docker $USER rồi đăng nhập lại, hoặc chạy sudo",
+			fail: "Cannot access the Docker socket",
+			hint: "sudo usermod -aG docker $USER then log in again, or run with sudo",
 			run:  checkUnixSocket("/var/run/docker.sock"),
 		},
 		{
 			pass: "D-Bus systemd",
-			fail: "Không truy cập D-Bus systemd",
-			hint: "chạy sudo — cần truy cập /run/dbus/system_bus_socket",
+			fail: "Cannot access systemd D-Bus",
+			hint: "run with sudo — needs access to /run/dbus/system_bus_socket",
 			run:  checkUnixSocket("/run/dbus/system_bus_socket"),
 		},
 		{
 			pass: "Nginx configs (/etc/nginx)",
-			fail: "Không đọc được /etc/nginx",
-			hint: "chạy sudo hoặc cấp quyền đọc — collector nginx cần liệt kê cấu hình",
+			fail: "Cannot read /etc/nginx",
+			hint: "run with sudo or grant read access — the nginx collector needs to list the config",
 			run: func() error {
 				_, err := os.ReadDir("/etc/nginx")
 				return err
@@ -54,16 +54,16 @@ func realChecks() []doctorCheck {
 		},
 		{
 			pass: "Systemd journal (journalctl)",
-			fail: "Không chạy được journalctl",
-			hint: "cài systemd hoặc thêm user vào group systemd-journal",
+			fail: "Cannot run journalctl",
+			hint: "install systemd or add the user to the systemd-journal group",
 			run: func() error {
 				return exec.Command("journalctl", "-n", "1", "--no-pager").Run()
 			},
 		},
 		{
 			pass: "Log paths (/var/log)",
-			fail: "Không đọc được /var/log",
-			hint: "thêm user vào group adm (sudo usermod -aG adm $USER) hoặc chạy sudo",
+			fail: "Cannot read /var/log",
+			hint: "add the user to the adm group (sudo usermod -aG adm $USER) or run with sudo",
 			run: func() error {
 				_, err := os.ReadDir("/var/log")
 				return err
@@ -71,8 +71,8 @@ func realChecks() []doctorCheck {
 		},
 		{
 			pass: "Cron paths (/etc/crontab, /etc/cron.d)",
-			fail: "Không đọc được cron paths (/etc/crontab, /etc/cron.d)",
-			hint: "chạy sudo — /etc/crontab thường chỉ root đọc được",
+			fail: "Cannot read cron paths (/etc/crontab, /etc/cron.d)",
+			hint: "run with sudo — /etc/crontab is usually root-only",
 			run: func() error {
 				if _, err := os.ReadFile("/etc/crontab"); err != nil {
 					return err
@@ -147,18 +147,18 @@ func checkUnixSocket(path string) func() error {
 // runDoctor prints one line per check plus the final summary line stating
 // whether every source is available.
 func runDoctor(w io.Writer, checks []doctorCheck) bool {
-	_, _ = fmt.Fprintln(w, "Kiểm tra quyền truy cập (chỉ đọc):")
+	_, _ = fmt.Fprintln(w, "Checking source access (read-only):")
 	available := true
 	for _, c := range checks {
 		if err := c.run(); err != nil {
 			available = false
-			_, _ = fmt.Fprintf(w, "✗ %s\n   Gợi ý: %s\n", c.fail, c.hint)
+			_, _ = fmt.Fprintf(w, "✗ %s\n   Hint: %s\n", c.fail, c.hint)
 			continue
 		}
 		_, _ = fmt.Fprintf(w, "✓ %s\n", c.pass)
 	}
 	if available {
-		_, _ = fmt.Fprintln(w, "✅ Tất cả nguồn khả dụng")
+		_, _ = fmt.Fprintln(w, "✅ All sources available")
 	}
 	return available
 }

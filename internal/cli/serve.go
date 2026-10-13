@@ -40,6 +40,6 @@ func runServe(ctx context.Context, w io.Writer, dbPath, addr string) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "Web UI đang chạy tại http://%s (Ctrl+C để dừng)\n", addr)
+	_, _ = fmt.Fprintf(w, "Web UI is running at http://%s (Ctrl+C to stop)\n", addr)
 	return srv.ListenAndServe(ctx, addr)
 }

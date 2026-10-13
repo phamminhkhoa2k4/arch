@@ -79,7 +79,7 @@ func TestConfirmPlanStageOrderAndPersist(t *testing.T) {
 		t.Fatalf("out-of-order confirm err = %v, want Candidate complaint", err)
 	}
 	if err := st.ConfirmPlanStage(ctx, planID, "Nope"); err == nil ||
-		!strings.Contains(err.Error(), "không hợp lệ") {
+		!strings.Contains(err.Error(), "invalid stage") {
 		t.Fatalf("bad stage err = %v", err)
 	}
 	if err := st.ConfirmPlanStage(ctx, planID, "Candidate"); err != nil {

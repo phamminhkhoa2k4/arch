@@ -31,7 +31,7 @@ func WriteMarkdown(w io.Writer, r Report) error {
 	}
 
 	b.WriteString("\n## Blind spots\n\n")
-	b.WriteString("_Vùng mù là dữ kiện: kết luận dưới đây có thể thiếu nguồn bị chặn._\n\n")
+	b.WriteString("_Blind spots are evidence: the conclusions below may lack blocked sources._\n\n")
 	if len(r.BlindSpots) == 0 {
 		b.WriteString("_No blind spots._\n")
 	}

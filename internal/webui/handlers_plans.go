@@ -13,11 +13,11 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _, name, kind, err := s.st.PlanByID(r.Context(), planID)
 	if err != nil {
-		httpError(w, http.StatusNotFound, "kế hoạch không tồn tại")
+		httpError(w, http.StatusNotFound, "plan does not exist")
 		return
 	}
 	s.render(w, "plan", map[string]any{
-		"Title":  "Kế hoạch #" + strconv.FormatInt(planID, 10),
+		"Title":  "Plan #" + strconv.FormatInt(planID, 10),
 		"ScanID": s.scanID,
 		"PlanID": planID,
 		"Name":   name,
@@ -34,7 +34,7 @@ func (s *Server) handlePlanJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	_, entityID, name, kind, err := s.st.PlanByID(r.Context(), planID)
 	if err != nil {
-		httpError(w, http.StatusNotFound, "kế hoạch không tồn tại")
+		httpError(w, http.StatusNotFound, "plan does not exist")
 		return
 	}
 	states, err := s.st.PlanStageStates(r.Context(), planID)
@@ -61,7 +61,7 @@ func (s *Server) handleConfirmStage(w http.ResponseWriter, r *http.Request) {
 	}
 	stage := r.PathValue("stage")
 	if stage == "" {
-		httpError(w, http.StatusBadRequest, "thiếu tên giai đoạn")
+		httpError(w, http.StatusBadRequest, "missing stage name")
 		return
 	}
 	if err := s.st.ConfirmPlanStage(r.Context(), planID, stage); err != nil {
@@ -80,7 +80,7 @@ func (s *Server) handleConfirmStage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) pathPlanID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		httpError(w, http.StatusBadRequest, "id kế hoạch không hợp lệ")
+		httpError(w, http.StatusBadRequest, "invalid plan id")
 		return 0, false
 	}
 	return id, true

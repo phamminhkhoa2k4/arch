@@ -88,7 +88,7 @@ func runDeleteCheck(ctx context.Context, w io.Writer, dbPath, rulesPath, ref, fo
 		return err
 	}
 	if code != ExitOK {
-		return attention(fmt.Errorf("verdict %s cần chú ý", res.State))
+		return attention(fmt.Errorf("verdict %s needs attention", res.State))
 	}
 	return nil
 }
@@ -155,12 +155,12 @@ func resolveComponent(ctx context.Context, st *store.Store, scanID int64, ref st
 	}
 	switch len(entities) {
 	case 0:
-		return store.EntityRow{}, fmt.Errorf("không tìm thấy component nào khớp %q trong scan #%d", ref, scanID)
+		return store.EntityRow{}, fmt.Errorf("no component matches %q in scan #%d", ref, scanID)
 	case 1:
 		return entities[0], nil
 	default:
 		var b strings.Builder
-		fmt.Fprintf(&b, "tham chiếu %q khớp %d entity — dùng identity_key:", ref, len(entities))
+		fmt.Fprintf(&b, "reference %q matches %d entities — use an identity_key:", ref, len(entities))
 		for _, e := range entities {
 			fmt.Fprintf(&b, "\n  %s", e.IdentityKey)
 		}
@@ -170,19 +170,19 @@ func resolveComponent(ctx context.Context, st *store.Store, scanID int64, ref st
 
 // printDeleteCheck renders the fixed section order (state, window,
 // coverage, blockers, signals, blind, action). An optional
-// "Lý do:" block (non-ACTIVE states list every reason, never a single
-// line) sits directly before the final action line.
+// "Reasons:" block (non-ACTIVE states list every reason, never a
+// single line) sits directly before the final action line.
 func printDeleteCheck(w io.Writer, res verdict.Result) error {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Trạng thái: %s\n", res.State)
-	fmt.Fprintf(&b, "Cửa sổ quan sát: %s → %s (%d ngày)\n",
+	fmt.Fprintf(&b, "State: %s\n", res.State)
+	fmt.Fprintf(&b, "Observation window: %s → %s (%d days)\n",
 		res.Window.Start, res.Window.End, res.Window.Days)
-	fmt.Fprintf(&b, "Evidence coverage: %s — thiếu: %s\n",
+	fmt.Fprintf(&b, "Evidence coverage: %s — missing: %s\n",
 		res.Coverage, missingList(res.Missing))
 
 	if len(res.Blockers) == 0 {
-		fmt.Fprintln(&b, "⛔ Blockers: (không có)")
+		fmt.Fprintln(&b, "⛔ Blockers: (none)")
 	} else {
 		fmt.Fprintln(&b, "⛔ Blockers:")
 		for _, item := range res.Blockers {
@@ -191,18 +191,18 @@ func printDeleteCheck(w io.Writer, res verdict.Result) error {
 	}
 
 	if len(res.Signals) == 0 {
-		fmt.Fprintln(&b, "⚠ Tín hiệu không-dùng: (không có)")
+		fmt.Fprintln(&b, "⚠ Non-delete signals: (none)")
 	} else {
-		fmt.Fprintln(&b, "⚠ Tín hiệu không-dùng:")
+		fmt.Fprintln(&b, "⚠ Non-delete signals:")
 		for _, item := range res.Signals {
 			fmt.Fprintf(&b, "  - %s %s%s\n", item.Code, item.Text, traceRef(item.EvidenceID, item.RawRef))
 		}
 	}
 
 	if len(res.Blinds) == 0 {
-		fmt.Fprintln(&b, "? Vùng mù: (không có)")
+		fmt.Fprintln(&b, "? Blind spots: (none)")
 	} else {
-		fmt.Fprintln(&b, "? Vùng mù:")
+		fmt.Fprintln(&b, "? Blind spots:")
 		for _, bl := range res.Blinds {
 			line := fmt.Sprintf("  - %s: %s", bl.Channel, bl.Reason)
 			if len(bl.Detail) > 0 {
@@ -213,13 +213,13 @@ func printDeleteCheck(w io.Writer, res verdict.Result) error {
 	}
 
 	if len(res.Reasons) > 0 {
-		fmt.Fprintln(&b, "Lý do:")
+		fmt.Fprintln(&b, "Reasons:")
 		for _, r := range res.Reasons {
 			fmt.Fprintf(&b, "  - %s\n", r)
 		}
 	}
 
-	fmt.Fprintf(&b, "Hành động gợi ý: %s\n", res.Action)
+	fmt.Fprintf(&b, "Suggested action: %s\n", res.Action)
 
 	_, err := io.WriteString(w, b.String())
 	return err
@@ -228,7 +228,7 @@ func printDeleteCheck(w io.Writer, res verdict.Result) error {
 // missingList renders the missing-channel list for the coverage line.
 func missingList(missing []string) string {
 	if len(missing) == 0 {
-		return "(không)"
+		return "(none)"
 	}
 	return strings.Join(missing, ", ")
 }

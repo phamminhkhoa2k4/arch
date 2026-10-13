@@ -68,7 +68,7 @@ func blockerB1(in Input) []Item {
 		}
 		out = append(out, Item{
 			Code:       "B1",
-			Text:       fmt.Sprintf("nginx route/upstream %q đang proxy tới entity này", p.NodeNames[far]),
+			Text:       fmt.Sprintf("nginx route/upstream %q is proxying to this entity", p.NodeNames[far]),
 			EvidenceID: p.EvidenceID,
 			RawRef:     p.RawRef,
 		})
@@ -90,7 +90,7 @@ func blockerB2(in Input, r rules.Rules) []Item {
 		}
 		out = append(out, Item{
 			Code:       "B2",
-			Text:       fmt.Sprintf("kết nối inbound trong cửa sổ quan sát (%s, %d gói)", o.LastSeenAt, o.Count),
+			Text:       fmt.Sprintf("inbound connection inside the observation window (%s, %d packets)", o.LastSeenAt, o.Count),
 			EvidenceID: o.ID,
 			RawRef:     "observations#" + fmt.Sprint(o.ID),
 		})
@@ -109,7 +109,7 @@ func blockerB2(in Input, r rules.Rules) []Item {
 		}
 		out = append(out, Item{
 			Code:       "B2",
-			Text:       fmt.Sprintf("traffic nginx trong cửa sổ quan sát (lần cuối %s)", e.Value["last_request_at"]),
+			Text:       fmt.Sprintf("nginx traffic inside the observation window (last seen %s)", e.Value["last_request_at"]),
 			EvidenceID: e.ID,
 			RawRef:     e.RawRef,
 		})
@@ -132,7 +132,7 @@ func blockerB3(in Input) []Item {
 		}
 		out = append(out, Item{
 			Code:       "B3",
-			Text:       fmt.Sprintf("unit %q (active) depends_on entity này", e.Neighbor.Name),
+			Text:       fmt.Sprintf("unit %q (active) depends_on this entity", e.Neighbor.Name),
 			EvidenceID: e.EvidenceID,
 			RawRef:     e.RawRef,
 		})
@@ -153,7 +153,7 @@ func blockerB4(in Input) []Item {
 		far := len(p.NodeKinds) - 1
 		out = append(out, Item{
 			Code:       "B4",
-			Text:       fmt.Sprintf("compose service %q (đang chạy) depends_on entity này", p.NodeNames[far]),
+			Text:       fmt.Sprintf("compose service %q (running) depends_on this entity", p.NodeNames[far]),
 			EvidenceID: p.EvidenceID,
 			RawRef:     p.RawRef,
 		})
@@ -210,28 +210,28 @@ func blockerB5(in Input) []Item {
 		case e.Dir == "in" && e.Kind == "references" && e.Neighbor.Kind == "cron_job":
 			out = append(out, Item{
 				Code:       "B5",
-				Text:       fmt.Sprintf("cron %q còn hạn đang tham chiếu entity này", e.Neighbor.Name),
+				Text:       fmt.Sprintf("cron %q still references this entity", e.Neighbor.Name),
 				EvidenceID: e.EvidenceID,
 				RawRef:     e.RawRef,
 			})
 		case e.Dir == "out" && e.Kind == "scheduled_by" && e.Neighbor.Kind == "timer":
 			out = append(out, Item{
 				Code:       "B5",
-				Text:       fmt.Sprintf("timer %q còn hạn đang tham chiếu entity này", e.Neighbor.Name),
+				Text:       fmt.Sprintf("timer %q still references this entity", e.Neighbor.Name),
 				EvidenceID: e.EvidenceID,
 				RawRef:     e.RawRef,
 			})
 		case isScheduler && e.Kind == "references" && e.Dir == "out":
 			out = append(out, Item{
 				Code:       "B5",
-				Text:       fmt.Sprintf("scheduler còn hạn tham chiếu %q (%s)", e.Neighbor.Name, e.Neighbor.Kind),
+				Text:       fmt.Sprintf("scheduler still references %q (%s)", e.Neighbor.Name, e.Neighbor.Kind),
 				EvidenceID: e.EvidenceID,
 				RawRef:     e.RawRef,
 			})
 		case isScheduler && e.Kind == "scheduled_by" && e.Dir == "in":
 			out = append(out, Item{
 				Code:       "B5",
-				Text:       fmt.Sprintf("timer còn hạn đang lên lịch cho %q", e.Neighbor.Name),
+				Text:       fmt.Sprintf("timer still schedules %q", e.Neighbor.Name),
 				EvidenceID: e.EvidenceID,
 				RawRef:     e.RawRef,
 			})
@@ -253,28 +253,28 @@ func blockerB6(in Input) []Item {
 		case e.Dir == "in" && e.Kind == "listens_on" && contains(e.Neighbor.InUseChannels, "procfs_net"):
 			out = append(out, Item{
 				Code:       "B6",
-				Text:       fmt.Sprintf("listener %q đang mở (socket sống) trỏ tới entity này", e.Neighbor.Name),
+				Text:       fmt.Sprintf("listener %q is open (live socket) pointing at this entity", e.Neighbor.Name),
 				EvidenceID: e.EvidenceID,
 				RawRef:     e.RawRef,
 			})
 		case e.Dir == "out" && e.Kind == "listens_on" && neighborRunning(e.Neighbor):
 			out = append(out, Item{
 				Code:       "B6",
-				Text:       fmt.Sprintf("chủ %q (%s) đang chạy và giữ listener này", e.Neighbor.Name, e.Neighbor.Kind),
+				Text:       fmt.Sprintf("owner %q (%s) is running and holds this listener", e.Neighbor.Name, e.Neighbor.Kind),
 				EvidenceID: e.EvidenceID,
 				RawRef:     e.RawRef,
 			})
 		case e.Dir == "in" && e.Kind == "runs_as" && e.Neighbor.Attributes["active_state"] == "active":
 			out = append(out, Item{
 				Code:       "B6",
-				Text:       fmt.Sprintf("unit active %q đang thực thi entity này", e.Neighbor.Name),
+				Text:       fmt.Sprintf("active unit %q is executing this entity", e.Neighbor.Name),
 				EvidenceID: e.EvidenceID,
 				RawRef:     e.RawRef,
 			})
 		case e.Dir == "in" && e.Kind == "manages" && neighborRunning(e.Neighbor):
 			out = append(out, Item{
 				Code:       "B6",
-				Text:       fmt.Sprintf("chủ %q (%s) đang chạy và quản lý entity này", e.Neighbor.Name, e.Neighbor.Kind),
+				Text:       fmt.Sprintf("owner %q (%s) is running and manages this entity", e.Neighbor.Name, e.Neighbor.Kind),
 				EvidenceID: e.EvidenceID,
 				RawRef:     e.RawRef,
 			})
@@ -312,9 +312,9 @@ func blockerB6Paths(in Input) []Item {
 		if p.NodeKinds[far] != "listener" || !contains(p.FarInUse, "procfs_net") {
 			continue
 		}
-		text := fmt.Sprintf("listener %q đang mở (socket sống) trỏ tới entity này", p.NodeNames[far])
+		text := fmt.Sprintf("listener %q is open (live socket) pointing at this entity", p.NodeNames[far])
 		if len(p.EdgeKinds) > 1 {
-			text = fmt.Sprintf("listener %q đang mở (socket sống) — map qua %q tới entity này",
+			text = fmt.Sprintf("listener %q is open (live socket) — mapped through %q to this entity",
 				p.NodeNames[far], p.NodeNames[far-1])
 		}
 		out = append(out, Item{

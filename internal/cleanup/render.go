@@ -51,42 +51,42 @@ type Meta struct {
 func RenderMarkdown(p Plan, meta Meta) string {
 	var b strings.Builder
 	c := p.Component
-	fmt.Fprintf(&b, "# Kế hoạch dọn dẹp — %s (%s)\n\n", c.Name, c.Kind)
-	fmt.Fprintf(&b, "- Verdict: **%s** · Coverage: %s · Cửa sổ: %s\n",
+	fmt.Fprintf(&b, "# Cleanup plan — %s (%s)\n\n", c.Name, c.Kind)
+	fmt.Fprintf(&b, "- Verdict: **%s** · Coverage: %s · Window: %s\n",
 		meta.VerdictState, meta.Coverage, meta.WindowLine)
 	fmt.Fprintf(&b, "- Identity: `%s`\n", c.IdentityKey)
-	fmt.Fprintf(&b, "- Sinh lúc: %s (bản thân tool KHÔNG chạy lệnh nào — bạn tự chạy từng script)\n",
+	fmt.Fprintf(&b, "- Generated at: %s (the tool itself runs NO commands — you run each script by hand)\n",
 		meta.GeneratedAt.UTC().Format(time.RFC3339))
 
 	if len(meta.Blockers) > 0 {
-		fmt.Fprintf(&b, "\n## Blockers tại thời điểm sinh plan\n\n")
+		fmt.Fprintf(&b, "\n## Blockers at plan generation time\n\n")
 		for _, bl := range meta.Blockers {
 			fmt.Fprintf(&b, "- %s\n", bl)
 		}
 	}
 	if len(meta.Signals) > 0 {
-		fmt.Fprintf(&b, "\n## Tín hiệu không-dùng (tham khảo)\n\n")
+		fmt.Fprintf(&b, "\n## Non-delete signals (for reference)\n\n")
 		for _, sg := range meta.Signals {
 			fmt.Fprintf(&b, "- %s\n", sg)
 		}
 	}
 	if len(p.VolumeWarnings) > 0 {
-		fmt.Fprintf(&b, "\n## ⚠ Volume dữ liệu — bắt buộc backup tay\n\n")
+		fmt.Fprintf(&b, "\n## ⚠ Data volumes — manual backup required\n\n")
 		for _, v := range p.VolumeWarnings {
-			fmt.Fprintf(&b, "- `%s` — có thể còn dữ liệu; xác nhận đã backup trước khi qua stage Removed.\n", v)
+			fmt.Fprintf(&b, "- `%s` — may still hold data; confirm your backup before the Removed stage.\n", v)
 		}
 	}
 
-	fmt.Fprintf(&b, "\n## 6 giai đoạn\n\n")
+	fmt.Fprintf(&b, "\n## 6 stages\n\n")
 	for i, st := range p.Stages {
 		fmt.Fprintf(&b, "### %d. %s\n\n", i+1, st.Name)
-		fmt.Fprintf(&b, "- **Hành động:** %s\n", st.Action)
-		fmt.Fprintf(&b, "- **Điều kiện qua cổng (gate):** %s\n", st.Gate)
-		fmt.Fprintf(&b, "- **Ai/cái gì xác nhận:** %s\n", st.Confirmer)
-		fmt.Fprintf(&b, "- **Script:** `%s` — chạy tay sau khi đã đọc; mỗi lệnh biến đổi đều kèm dòng `# rollback:`.\n\n",
+		fmt.Fprintf(&b, "- **Action:** %s\n", st.Action)
+		fmt.Fprintf(&b, "- **Gate condition:** %s\n", st.Gate)
+		fmt.Fprintf(&b, "- **Confirmer:** %s\n", st.Confirmer)
+		fmt.Fprintf(&b, "- **Script:** `%s` — run by hand after reading; every mutating command carries a `# rollback:` line.\n\n",
 			ScriptFiles[st.Name])
 	}
-	fmt.Fprintf(&b, "## Tiến độ\n\n```\narchaeologist plan status %q\narchaeologist plan confirm %q <Stage>\n```\n",
+	fmt.Fprintf(&b, "## Progress\n\n```\narchaeologist plan status %q\narchaeologist plan confirm %q <Stage>\n```\n",
 		c.Ref, c.Ref)
 	return b.String()
 }

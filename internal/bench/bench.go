@@ -93,7 +93,7 @@ func Run(dbPath, gtPath, rulesPath, observeLog, historyPath string, out io.Write
 		return err
 	}
 	if cp.GateFailed() {
-		return fmt.Errorf("checkpoint #2: false-orphan hoặc precision LIKELY_ORPHANED dưới ngưỡng")
+		return fmt.Errorf("checkpoint #2: false-orphan rate or LIKELY_ORPHANED precision below threshold")
 	}
 	return nil
 }
@@ -158,7 +158,7 @@ func (r *Report) measureOwned(st *store.Store, scanID int64, gt *GroundTruth) er
 	for _, want := range gt.Listeners {
 		if _, ok := byKey[want.key()]; !ok {
 			r.OwnedTotal++
-			r.Unowned = append(r.Unowned, "gt:"+want.ID+" (không có trong scan)")
+			r.Unowned = append(r.Unowned, "gt:"+want.ID+" (missing from scan)")
 		}
 	}
 	for _, l := range listeners {
@@ -206,34 +206,34 @@ func (r *Report) measureRoutes(st *store.Store, scanID int64, gt *GroundTruth) e
 // Write prints the report; misses add GitHub Actions warning
 // annotations that keep the job green (exit 0) while surfacing the gap.
 func (r *Report) Write(out io.Writer) error {
-	if _, err := fmt.Fprintf(out, "Listener có chủ: %d/%d = %.1f%% (mục tiêu ≥%.0f%%)\n",
+	if _, err := fmt.Fprintf(out, "Listeners with owner: %d/%d = %.1f%% (target ≥%.0f%%)\n",
 		r.OwnedOK, r.OwnedTotal, r.OwnedPct, MinOwnedPercent); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(out, "Chuỗi route đúng: %d/%d = %.1f%% (mục tiêu %.0f%%)\n",
+	if _, err := fmt.Fprintf(out, "Correct route chains: %d/%d = %.1f%% (target %.0f%%)\n",
 		r.RoutesOK, r.RoutesTotal, r.RoutesPct, MinRoutePercent); err != nil {
 		return err
 	}
 	if r.OwnedPct < MinOwnedPercent {
 		for _, id := range r.Unowned {
-			if _, err := fmt.Fprintf(out, "  không có chủ: %s\n", id); err != nil {
+			if _, err := fmt.Fprintf(out, "  no owner: %s\n", id); err != nil {
 				return err
 			}
 		}
 		if _, err := fmt.Fprintf(out,
-			"::warning title=benchmark::Listener có chủ %.1f%% dưới ngưỡng %.0f%%\n",
+			"::warning title=benchmark::Listeners with owner %.1f%% below threshold %.0f%%\n",
 			r.OwnedPct, MinOwnedPercent); err != nil {
 			return err
 		}
 	}
 	if r.RoutesPct < MinRoutePercent {
 		for _, id := range r.BrokenRoutes {
-			if _, err := fmt.Fprintf(out, "  chuỗi sai: %s\n", id); err != nil {
+			if _, err := fmt.Fprintf(out, "  broken chain: %s\n", id); err != nil {
 				return err
 			}
 		}
 		if _, err := fmt.Fprintf(out,
-			"::warning title=benchmark::Chuỗi route đúng %.1f%% dưới ngưỡng %.0f%%\n",
+			"::warning title=benchmark::Correct route chains %.1f%% below threshold %.0f%%\n",
 			r.RoutesPct, MinRoutePercent); err != nil {
 			return err
 		}

@@ -1,6 +1,6 @@
 # Infrastructure Archaeologist — local validation entrypoints.
 
-.PHONY: build test lint check cross bench benchmark
+.PHONY: build test lint check cross bench benchmark snapshot release-check
 
 build:
 	go build ./...
@@ -26,3 +26,11 @@ cross:
 	GOOS=linux GOARCH=amd64 go build -o /tmp/archaeologist-amd64 ./cmd/archaeologist
 	GOOS=linux GOARCH=arm64 go build -o /tmp/archaeologist-arm64 ./cmd/archaeologist
 	@echo "cross-compile OK: amd64 + arm64"
+
+## release-check: validate the goreleaser config.
+release-check:
+	goreleaser check
+
+## snapshot: local goreleaser build without publishing (needs goreleaser installed).
+snapshot:
+	goreleaser release --snapshot --clean --skip=publish

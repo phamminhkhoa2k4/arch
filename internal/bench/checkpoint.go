@@ -79,7 +79,7 @@ func MeasureCheckpoint(dbPath string, gt *GroundTruth, r rules.Rules) (*Checkpoi
 		}
 		if len(ents) != 1 {
 			cp.Errors = append(cp.Errors,
-				fmt.Sprintf("%s: ref %q khớp %d entity", comp.ID, comp.Ref, len(ents)))
+				fmt.Sprintf("%s: ref %q matches %d entities", comp.ID, comp.Ref, len(ents)))
 			continue
 		}
 		in, err := st.BuildInput(ctx, scanID, ents[0].ID)
@@ -173,7 +173,7 @@ func (c *CheckpointReport) Write(out io.Writer) error {
 	if c.NonOrphanExpected > 0 {
 		rate = float64(len(c.FalseOrphans)) / float64(c.NonOrphanExpected) * 100.0
 	}
-	if _, err := fmt.Fprintf(out, "False-orphan: %d/%d = %.1f%% (mục tiêu 0)\n",
+	if _, err := fmt.Fprintf(out, "False-orphan: %d/%d = %.1f%% (target 0)\n",
 		len(c.FalseOrphans), c.NonOrphanExpected, rate); err != nil {
 		return err
 	}
@@ -185,11 +185,11 @@ func (c *CheckpointReport) Write(out io.Writer) error {
 	}
 	if c.Predictions == 0 {
 		if _, err := fmt.Fprintln(out,
-			"Precision LIKELY_ORPHANED: không có dự đoán (vacuous — đạt)"); err != nil {
+			"Precision LIKELY_ORPHANED: no predictions (vacuous — pass)"); err != nil {
 			return err
 		}
 	} else {
-		if _, err := fmt.Fprintf(out, "Precision LIKELY_ORPHANED: %d/%d = %.1f%% (mục tiêu ≥%.0f%%)\n",
+		if _, err := fmt.Fprintf(out, "Precision LIKELY_ORPHANED: %d/%d = %.1f%% (target ≥%.0f%%)\n",
 			c.LikelyTP, c.Predictions, c.Precision(), MinLikelyPrecision); err != nil {
 			return err
 		}
@@ -204,7 +204,7 @@ func (c *CheckpointReport) Write(out io.Writer) error {
 		return err
 	}
 	if len(c.TrapResults) > 0 {
-		if _, err := fmt.Fprintln(out, "Bẫy:"); err != nil {
+		if _, err := fmt.Fprintln(out, "Traps:"); err != nil {
 			return err
 		}
 		for _, tr := range c.TrapResults {
@@ -219,13 +219,13 @@ func (c *CheckpointReport) Write(out io.Writer) error {
 		}
 	}
 	for _, e := range c.Errors {
-		if _, err := fmt.Fprintf(out, "  lỗi component: %s\n", e); err != nil {
+			if _, err := fmt.Fprintf(out, "  component error: %s\n", e); err != nil {
 			return err
 		}
 	}
 	if c.GateFailed() {
 		if _, err := fmt.Fprintln(out,
-			"::error title=checkpoint2::False-orphan hoặc precision LIKELY_ORPHANED dưới ngưỡng — chặn merge feature"); err != nil {
+			"::error title=checkpoint2::False-orphan rate or LIKELY_ORPHANED precision below threshold — blocking feature merge"); err != nil {
 			return err
 		}
 	}
@@ -237,5 +237,5 @@ func trapNote(cv componentVerdict) string {
 	if cv.Trap == "" {
 		return ""
 	}
-	return " [bẫy: " + cv.Trap + "]"
+	return " [trap: " + cv.Trap + "]"
 }

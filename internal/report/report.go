@@ -44,7 +44,7 @@ type Finding struct {
 }
 
 // Blind is one blind spot — host-wide (entity fields empty) or
-// entity-scoped. Vùng mù là công dân hạng nhất: luôn hiển thị.
+// entity-scoped. Blind spots are first-class citizens: always shown.
 type Blind struct {
 	Channel    string            `json:"channel"`
 	Reason     string            `json:"reason"`

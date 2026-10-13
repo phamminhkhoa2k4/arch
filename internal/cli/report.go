@@ -87,7 +87,7 @@ func runReport(ctx context.Context, w io.Writer, dbPath, outPath, format string)
 		if err := f.Close(); err != nil {
 			return fmt.Errorf("close report file: %w", err)
 		}
-		_, _ = fmt.Fprintf(w, "Báo cáo đã ghi: %s (scan #%d)\n", outPath, scanID)
+		_, _ = fmt.Fprintf(w, "Report written: %s (scan #%d)\n", outPath, scanID)
 		return nil
 	}
 }

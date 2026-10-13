@@ -12,6 +12,8 @@ scripts/bin/harness.exe
 lab/.vagrant/
 lab/.multipass/
 out/
+# GoReleaser output
+dist/
 # Local benchmark history (CI uploads it as an artifact instead)
 bench-results/
 *.html

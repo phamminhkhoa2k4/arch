@@ -102,7 +102,7 @@ func (s *Store) ConfirmPlanStage(ctx context.Context, planID int64, stage string
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("giai đoạn không hợp lệ: %q (phải là một trong %v)", stage, PlanStages)
+		return fmt.Errorf("invalid stage %q (must be one of %v)", stage, PlanStages)
 	}
 	states, err := s.PlanStageStates(ctx, planID)
 	if err != nil {
@@ -110,7 +110,7 @@ func (s *Store) ConfirmPlanStage(ctx context.Context, planID int64, stage string
 	}
 	for i := 0; i < idx; i++ {
 		if states[i].Status != "done" {
-			return fmt.Errorf("chưa confirm %s — giai đoạn %s phải hoàn tất trước", states[i].Stage, stage)
+			return fmt.Errorf("stage %s not confirmed yet — %s must be completed first", states[i].Stage, stage)
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339)

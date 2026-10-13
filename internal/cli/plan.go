@@ -84,7 +84,7 @@ func runPlanGenerate(ctx context.Context, w io.Writer, ref, dbPath, rulesPath, o
 		if err := printPlanRefusal(w, res); err != nil {
 			return err
 		}
-		return attention(fmt.Errorf("verdict %s không đủ điều kiện để sinh kế hoạch", res.State))
+		return attention(fmt.Errorf("verdict %s is not eligible for a cleanup plan", res.State))
 	}
 	planID, err := st.EnsurePlan(ctx, ent.ID)
 	if err != nil {
@@ -101,11 +101,11 @@ func runPlanGenerate(ctx context.Context, w io.Writer, ref, dbPath, rulesPath, o
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "Đã sinh kế hoạch 6 giai đoạn cho %s (%s) — %d file tại %s\n",
+	_, _ = fmt.Fprintf(w, "Generated a 6-stage plan for %s (%s) — %d files in %s\n",
 		ent.Name, ent.Kind, len(files), dir)
-	_, _ = fmt.Fprintf(w, "Verdict: %s · plan id %d · KHÔNG lệnh nào được tự chạy — bạn chạy tay từng script.\n",
+	_, _ = fmt.Fprintf(w, "Verdict: %s · plan id %d · no command is auto-executed — you run each script by hand.\n",
 		res.State, planID)
-	_, _ = fmt.Fprintf(w, "Tiến độ: archaeologist plan status %q\n", ref)
+	_, _ = fmt.Fprintf(w, "Progress: archaeologist plan status %q\n", ref)
 	return nil
 }
 
@@ -117,7 +117,7 @@ func runPlanStatus(ctx context.Context, w io.Writer, ref, dbPath string) error {
 	defer func() { _ = st.Close() }()
 	planID, err := st.LatestPlanID(ctx, ent.ID)
 	if err != nil {
-		_, _ = fmt.Fprintf(w, "Component %s chưa có kế hoạch — chạy `archaeologist plan %q` trước.\n",
+		_, _ = fmt.Fprintf(w, "Component %s has no plan yet — run `archaeologist plan %q` first.\n",
 			ent.Name, ref)
 		return nil
 	}
@@ -125,7 +125,7 @@ func runPlanStatus(ctx context.Context, w io.Writer, ref, dbPath string) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "Kế hoạch #%d cho %s (%s):\n", planID, ent.Name, ent.Kind)
+	_, _ = fmt.Fprintf(w, "Plan #%d for %s (%s):\n", planID, ent.Name, ent.Kind)
 	current := ""
 	for _, s := range states {
 		mark := " "
@@ -142,10 +142,10 @@ func runPlanStatus(ctx context.Context, w io.Writer, ref, dbPath string) error {
 		}
 	}
 	if current == "" {
-		_, _ = fmt.Fprintln(w, "Toàn bộ 6 giai đoạn đã hoàn tất.")
+		_, _ = fmt.Fprintln(w, "All 6 stages are complete.")
 		return nil
 	}
-	_, _ = fmt.Fprintf(w, "Giai đoạn hiện tại: %s (còn lại: %s)\n",
+	_, _ = fmt.Fprintf(w, "Current stage: %s (remaining: %s)\n",
 		current, remainingAfter(states, current))
 	return nil
 }
@@ -158,13 +158,13 @@ func runPlanConfirm(ctx context.Context, w io.Writer, ref, stage, dbPath string)
 	defer func() { _ = st.Close() }()
 	planID, err := st.LatestPlanID(ctx, ent.ID)
 	if err != nil {
-		return fmt.Errorf("component %q chưa có kế hoạch — chạy `archaeologist plan %q` trước", ref, ref)
+		return fmt.Errorf("component %q has no plan yet — run `archaeologist plan %q` first", ref, ref)
 	}
 	stage = canonicalStage(stage)
 	if err := st.ConfirmPlanStage(ctx, planID, stage); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "Đã confirm %s (plan #%d cho %s).\n", stage, planID, ent.Name)
+	_, _ = fmt.Fprintf(w, "Confirmed %s (plan #%d for %s).\n", stage, planID, ent.Name)
 	return nil
 }
 
@@ -207,17 +207,17 @@ func planEligible(state string) bool {
 // printPlanRefusal rejects the plan and points at the real blockers —
 // an ACTIVE component gets "remove the blocker first" guidance.
 func printPlanRefusal(w io.Writer, res verdict.Result) error {
-	_, _ = fmt.Fprintf(w, "KHÔNG sinh kế hoạch xóa: verdict là %s.\n", res.State)
+	_, _ = fmt.Fprintf(w, "No cleanup plan generated: verdict is %s.\n", res.State)
 	switch res.State {
 	case verdict.StateActive:
-		_, _ = fmt.Fprintln(w, "Component đang hoạt động — gỡ blocker trước, ví dụ:")
+		_, _ = fmt.Fprintln(w, "The component is active — remove the blockers first, for example:")
 		for _, b := range res.Blockers {
-			_, _ = fmt.Fprintf(w, "  - gỡ %s → quan sát 14 ngày (observe) → chạy lại plan\n", b.Text)
+			_, _ = fmt.Fprintf(w, "  - remove %s → observe for 14 days (observe) → re-run plan\n", b.Text)
 		}
 	case verdict.StateUnknown:
-		_, _ = fmt.Fprintln(w, "Chưa đủ bằng chứng để lên kế hoạch — mở rộng quan sát (observe) rồi chạy lại delete-check/plan.")
+		_, _ = fmt.Fprintln(w, "Not enough evidence to plan — extend observation (observe) then re-run delete-check/plan.")
 	default:
-		_, _ = fmt.Fprintf(w, "Chỉ LIKELY_ORPHANED hoặc ORPHANED mới có kế hoạch dọn; verdict hiện tại: %s\n",
+		_, _ = fmt.Fprintf(w, "Only LIKELY_ORPHANED or ORPHANED can produce a cleanup plan; current verdict: %s\n",
 			res.State)
 	}
 	return nil
@@ -236,7 +236,7 @@ func planMeta(res verdict.Result) cleanup.Meta {
 	return cleanup.Meta{
 		VerdictState: res.State,
 		Coverage:     res.Coverage,
-		WindowLine: fmt.Sprintf("%s → %s (%d ngày)",
+		WindowLine: fmt.Sprintf("%s → %s (%d days)",
 			res.Window.Start, res.Window.End, res.Window.Days),
 		Blockers:    blockers,
 		Signals:     signals,

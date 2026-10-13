@@ -58,10 +58,10 @@ func TestObserveLoopPrintsSamplesAndStops(t *testing.T) {
 		t.Fatalf("observeLoop: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "lần mẫu") {
+	if !strings.Contains(out, "sample round") {
 		t.Errorf("output missing per-sample line: %q", out)
 	}
-	if !strings.Contains(out, "observe: dừng sau") {
+	if !strings.Contains(out, "observe: stopped after") {
 		t.Errorf("output missing stop line: %q", out)
 	}
 	if n := f.samples.Load(); n < 2 {
@@ -95,8 +95,8 @@ func (*bufNull) Write(p []byte) (int, error) { return len(p), nil }
 func TestObserveLoopLoadErrorFailsFast(t *testing.T) {
 	f := &fakeObserver{}
 	err := observeLoop(context.Background(), &bufNull{}, f, time.Millisecond, false,
-		func() error { return errors.New("chưa có scan nào") })
-	if err == nil || !strings.Contains(err.Error(), "chưa có scan") {
+		func() error { return errors.New("no scan yet") })
+	if err == nil || !strings.Contains(err.Error(), "no scan") {
 		t.Fatalf("err = %v, want load failure", err)
 	}
 	if f.samples.Load() != 0 {
@@ -115,7 +115,7 @@ func TestObserveLoopRejectsBadInterval(t *testing.T) {
 // A failing sample costs one round, not the daemon: the loop keeps
 // ticking and surfaces the error on its output instead of exiting.
 func TestObserveLoopSurvivesSampleError(t *testing.T) {
-	f := &fakeObserver{err: errors.New("proc hỏng")}
+	f := &fakeObserver{err: errors.New("broken proc")}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var buf bytes.Buffer
@@ -138,7 +138,7 @@ func TestObserveLoopSurvivesSampleError(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("loop did not survive sample errors")
 	}
-	if !strings.Contains(buf.String(), "Error: lấy mẫu") {
+	if !strings.Contains(buf.String(), "Error: sampling") {
 		t.Errorf("output missing sample error line: %q", buf.String())
 	}
 	if loads.Load() < 3 {
@@ -174,7 +174,7 @@ func TestObserveLoopSurvivesLoadError(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("observeLoop must survive load errors, got %v", err)
 	}
-	if !strings.Contains(buf.String(), "Error: tải listener") {
+	if !strings.Contains(buf.String(), "Error: loading listeners") {
 		t.Errorf("output missing load error line: %q", buf.String())
 	}
 }

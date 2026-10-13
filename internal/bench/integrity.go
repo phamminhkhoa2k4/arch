@@ -56,7 +56,7 @@ func MeasureIntegrity(dbPath, observeLog string) (*IntegrityReport, error) {
 		return nil, fmt.Errorf("db: %w", err)
 	}
 
-	rep := &IntegrityReport{Observe: "n/a (cần observe-sla.log)"}
+	rep := &IntegrityReport{Observe: "n/a (needs observe-sla.log)"}
 	if err := st.DB().QueryRowContext(ctx,
 		`SELECT
 		   count(*),
@@ -86,7 +86,7 @@ func MeasureIntegrity(dbPath, observeLog string) (*IntegrityReport, error) {
 	if observeLog != "" {
 		summary, err := parseObserveLog(observeLog)
 		if err != nil {
-			rep.Observe = "n/a (không đọc được observe-sla.log)"
+			rep.Observe = "n/a (cannot read observe-sla.log)"
 		} else {
 			rep.Observe = summary
 		}
@@ -137,11 +137,11 @@ func parseObserveLog(path string) (string, error) {
 		return "", err
 	}
 	if samples < 2 || lastTS.Before(firstTS) {
-		return "n/a (cần ≥2 mẫu observe-sla.log)", nil
+		return "n/a (needs ≥2 samples in observe-sla.log)", nil
 	}
 	wall := lastTS.Sub(firstTS).Seconds()
 	cpuPct := float64(lastTicks-firstTicks) / clockTicks / wall * 100.0
-	return fmt.Sprintf("CPU %.2f%% · RAM tối đa %d KB (%d mẫu)", cpuPct, maxRSS, samples), nil
+	return fmt.Sprintf("CPU %.2f%% · max RAM %d KB (%d samples)", cpuPct, maxRSS, samples), nil
 }
 
 // parseSamplerTS extracts the leading "<YYYY-MM-DDTHH:MM:SSZ>" or bare
@@ -158,23 +158,23 @@ func parseSamplerTS(line string) (time.Time, bool) {
 // Write prints the integrity section; every line is informational and
 // never gates the run.
 func (r *IntegrityReport) Write(out io.Writer) error {
-	if _, err := fmt.Fprintf(out, "Evidence có raw_ref: %d/%d = %.1f%% (mục tiêu 100%%)\n",
+	if _, err := fmt.Fprintf(out, "Evidence with raw_ref: %d/%d = %.1f%% (target 100%%)\n",
 		r.RawRefOK, r.RawRefTotal, r.RawRefPct); err != nil {
 		return err
 	}
 	if r.RawRefPct < 100.0 {
 		if _, err := fmt.Fprintf(out,
-			"::warning title=benchmark::Evidence thiếu raw_ref — vi phạm truy vết\n"); err != nil {
+			"::warning title=benchmark::Evidence missing raw_ref — traceability violation\n"); err != nil {
 			return err
 		}
 	}
 	if r.ScanSeconds != nil {
-		if _, err := fmt.Fprintf(out, "Thời gian scan gần nhất: %ds (informational)\n",
+		if _, err := fmt.Fprintf(out, "Latest scan duration: %ds (informational)\n",
 			*r.ScanSeconds); err != nil {
 			return err
 		}
 	} else {
-		if _, err := fmt.Fprintln(out, "Thời gian scan gần nhất: n/a (chưa có finished_at)"); err != nil {
+		if _, err := fmt.Fprintln(out, "Latest scan duration: n/a (no finished_at yet)"); err != nil {
 			return err
 		}
 	}

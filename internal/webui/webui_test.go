@@ -148,7 +148,7 @@ func TestDashboardPageRenders(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Dashboard", "Things worth investigating", "Blind spots tổng quan", "scan #"} {
+	for _, want := range []string{"Dashboard", "Things worth investigating", "Blind spots overview", "scan #"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
@@ -231,7 +231,7 @@ func TestDetailPageHasBlindPanelOutsideTabs(t *testing.T) {
 	if !strings.Contains(body, `id="blind-panel"`) {
 		t.Error("blind-spot panel missing from detail page")
 	}
-	if !strings.Contains(body, "Không có vùng mù nào") {
+	if !strings.Contains(body, "No blind spots are attached") {
 		t.Error("empty blind panel must still render the explanation")
 	}
 	if !strings.Contains(body, `id="delete-check-btn"`) {
