@@ -1,0 +1,45 @@
+{{define "detail"}}
+{{template "layout_top" .}}
+<h1>{{.Entity.Name}} <span class="muted">{{.Entity.Kind}}</span></h1>
+<p class="mono muted">{{.Entity.IdentityKey}}</p>
+
+<button id="delete-check-btn" data-entity="{{.Entity.ID}}">Can I delete this?</button>
+
+<section id="blind-panel" class="blind-panel">
+  <h2>Blind Spots <span class="muted">(first-class citizens — not hidden under a tab)</span></h2>
+  {{if .Blinds}}
+  <table>
+    <thead><tr><th>Channel</th><th>Reason</th><th>Detail</th></tr></thead>
+    <tbody>
+    {{range .Blinds}}
+      <tr><td>{{.Channel}}</td><td>{{.Reason}}</td>
+        <td class="mono">{{range $k, $v := .Detail}}{{$k}}={{$v}} {{end}}</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>No blind spots are attached to this entity.</p>
+  {{end}}
+</section>
+
+<div class="tabs" role="tablist">
+  <button class="tab active" data-tab="overview">Overview</button>
+  <button class="tab" data-tab="dependencies">Dependencies</button>
+  <button class="tab" data-tab="activity">Activity</button>
+  <button class="tab" data-tab="evidence">Evidence</button>
+  <button class="tab" data-tab="history">History</button>
+</div>
+<div id="tab-content" data-entity="{{.Entity.ID}}">Loading…</div>
+
+<div id="delete-modal" class="modal hidden" data-entity="{{.Entity.ID}}">
+  <div class="modal-box">
+    <h2>Can I delete this?</h2>
+    <div id="modal-body">Loading verdict…</div>
+    <div class="modal-actions">
+      <button id="modal-close">Close</button>
+      <button id="modal-generate" class="primary hidden">Generate cleanup plan</button>
+    </div>
+  </div>
+</div>
+{{template "layout_bottom" .}}
+{{end}}

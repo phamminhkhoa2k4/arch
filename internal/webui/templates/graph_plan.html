@@ -1,0 +1,21 @@
+{{define "graph"}}
+{{template "layout_top" .}}
+<h1>Graph</h1>
+<p class="muted">Scan #{{.ScanID}} graph — click an edge to view evidence. Display cap: {{.Cap}} nodes.</p>
+<div id="graph-banner" class="banner hidden"></div>
+<svg id="graph-svg" width="100%" height="720" xmlns="http://www.w3.org/2000/svg"></svg>
+<aside id="edge-panel" class="edge-panel hidden">
+  <h3>Selected edge</h3>
+  <div id="edge-detail"></div>
+</aside>
+{{template "layout_bottom" .}}
+{{end}}
+
+{{define "plan"}}
+{{template "layout_top" .}}
+<h1>Cleanup Plan #{{.PlanID}}</h1>
+<p>{{.Name}} <span class="muted">({{.Kind}})</span></p>
+<p class="muted">State syncs with the <code>plan status</code> CLI command.</p>
+<div id="plan-stages" data-plan="{{.PlanID}}">Loading…</div>
+{{template "layout_bottom" .}}
+{{end}}

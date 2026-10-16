@@ -1,0 +1,79 @@
+{{define "layout_top"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Archaeologist</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav>
+  <a href="/">Dashboard</a>
+  <a href="/components">Components</a>
+  <a href="/graph">Graph</a>
+  <span class="scan">scan #{{.ScanID}}</span>
+</nav>
+<main>
+{{end}}
+
+{{define "layout_bottom"}}
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}
+
+{{define "dashboard"}}
+{{template "layout_top" .}}
+<h1>Dashboard</h1>
+<section class="cards">
+  <div class="card"><h2>Entities</h2>
+    <ul class="kv">
+    {{range $k, $v := .Report.Dashboard.EntitiesByKind}}
+      <li><span>{{$k}}</span><b>{{$v}}</b></li>
+    {{end}}
+    </ul>
+  </div>
+  <div class="card"><h2>Verdict</h2>
+    <ul class="kv">
+    {{range $k, $v := .Report.Dashboard.Verdict}}
+      <li><span>{{$k}}</span><b>{{$v}}</b></li>
+    {{end}}
+    </ul>
+  </div>
+  <div class="card"><h2>Blind spots</h2><p class="big">{{.Report.Dashboard.BlindSpots}}</p></div>
+  <div class="card"><h2>Findings</h2><p class="big">{{.Report.Dashboard.Findings}}</p></div>
+</section>
+
+<h2>Things worth investigating</h2>
+<table>
+  <thead><tr><th>Severity</th><th>Kind</th><th>Component</th><th>Detail</th></tr></thead>
+  <tbody>
+  {{range .Report.Findings}}
+    <tr>
+      <td>{{.Severity}}</td>
+      <td>{{.Kind}}</td>
+      <td><a href="/components?q={{.Identity}}">{{.EntityName}}</a></td>
+      <td class="mono">{{index .Detail "warning"}}{{index .Detail "path"}}{{index .Detail "image"}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="4">No findings.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+
+<h2>Blind spots overview</h2>
+<table>
+  <thead><tr><th>Channel</th><th>Reason</th><th>Entity</th></tr></thead>
+  <tbody>
+  {{range .Report.BlindSpots}}
+    <tr><td>{{.Channel}}</td><td>{{.Reason}}</td>
+      <td>{{if .EntityName}}{{.EntityKind}} · {{.EntityName}}{{else}}host-wide{{end}}</td></tr>
+  {{else}}
+    <tr><td colspan="3">No blind spots.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{template "layout_bottom" .}}
+{{end}}

@@ -17,6 +17,8 @@ dist/
 # Local benchmark history (CI uploads it as an artifact instead)
 bench-results/
 *.html
+# Embedded web UI pages are source, not generated output.
+!internal/webui/templates/*.html
 
 # local environment (VPS target, keys) — never commit
 .env

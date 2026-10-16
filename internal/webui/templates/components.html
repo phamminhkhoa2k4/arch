@@ -1,0 +1,55 @@
+{{define "components"}}
+{{template "layout_top" .}}
+<h1>Components <span class="muted">({{.Count}})</span></h1>
+<form class="filters" method="get" action="/components">
+  <label>Kind
+    <select name="kind">
+      <option value="">(all)</option>
+      {{range .Kinds}}<option {{if eq $.Filter.Kind .}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label>Status
+    <select name="status">
+      <option value="">(all)</option>
+      <option {{if eq .Filter.Status "ACTIVE"}}selected{{end}}>ACTIVE</option>
+      <option {{if eq .Filter.Status "LIKELY_ORPHANED"}}selected{{end}}>LIKELY_ORPHANED</option>
+      <option {{if eq .Filter.Status "ORPHANED"}}selected{{end}}>ORPHANED</option>
+      <option {{if eq .Filter.Status "UNKNOWN"}}selected{{end}}>UNKNOWN</option>
+    </select>
+  </label>
+  <label>Coverage
+    <select name="coverage">
+      <option value="">(all)</option>
+      <option {{if eq .Filter.Coverage "HIGH"}}selected{{end}}>HIGH</option>
+      <option {{if eq .Filter.Coverage "MEDIUM"}}selected{{end}}>MEDIUM</option>
+      <option {{if eq .Filter.Coverage "LOW"}}selected{{end}}>LOW</option>
+    </select>
+  </label>
+  <input type="hidden" name="sort" value="{{.Filter.Sort}}">
+  <input type="hidden" name="desc" value="{{if .Filter.Desc}}1{{end}}">
+  <button type="submit">Filter</button>
+</form>
+<table id="components-table">
+  <thead><tr>
+    <th><a href="/components?sort=name&kind={{.Filter.Kind}}&status={{.Filter.Status}}&coverage={{.Filter.Coverage}}">Name</a></th>
+    <th><a href="/components?sort=kind&kind={{.Filter.Kind}}&status={{.Filter.Status}}&coverage={{.Filter.Coverage}}">Kind</a></th>
+    <th><a href="/components?sort=status&kind={{.Filter.Kind}}&status={{.Filter.Status}}&coverage={{.Filter.Coverage}}">Status</a></th>
+    <th><a href="/components?sort=coverage&kind={{.Filter.Kind}}&status={{.Filter.Status}}&coverage={{.Filter.Coverage}}">Coverage</a></th>
+    <th><a href="/components?sort=last_activity&kind={{.Filter.Kind}}&status={{.Filter.Status}}&coverage={{.Filter.Coverage}}">Last activity</a></th>
+  </tr></thead>
+  <tbody>
+  {{range .Rows}}
+    <tr>
+      <td><a href="/components/{{.ID}}">{{.Name}}</a></td>
+      <td>{{.Kind}}</td>
+      <td><span class="badge st-{{.State}}">{{if .State}}{{.State}}{{else}}—{{end}}</span></td>
+      <td>{{if .Coverage}}{{.Coverage}}{{else}}—{{end}}</td>
+      <td class="mono">{{if .LastActivity}}{{.LastActivity}}{{else}}—{{end}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="5">No entities match the filter.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{template "layout_bottom" .}}
+{{end}}
