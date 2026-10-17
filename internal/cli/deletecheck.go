@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"archaeologist/internal/llm"
 	"archaeologist/internal/rules"
 	"archaeologist/internal/store"
 	"archaeologist/internal/verdict"
@@ -19,24 +20,28 @@ import (
 // issues the evidence-backed verdict in the fixed section order.
 func newDeleteCheckCmd() *cobra.Command {
 	var dbPath, rulesPath string
+	var explain bool
 	cmd := &cobra.Command{
 		Use:   "delete-check <component>",
 		Short: "Issue an evidence-backed verdict for one component",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			format, _ := cmd.Flags().GetString("format")
-			return runDeleteCheck(cmd.Context(), cmd.OutOrStdout(), dbPath, rulesPath, args[0], format)
+			return runDeleteCheck(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(),
+				dbPath, rulesPath, args[0], format, explain)
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
 		"path to the SQLite evidence database")
 	cmd.Flags().StringVar(&rulesPath, "rules-file", "",
 		"path to a rules.yaml override (default: embedded rules)")
+	cmd.Flags().BoolVar(&explain, "explain", false,
+		"ask the configured LLM for a plain-language explanation (needs ARCHAEOLOGIST_LLM_API_KEY)")
 	addFormatFlag(cmd)
 	return cmd
 }
 
-func runDeleteCheck(ctx context.Context, w io.Writer, dbPath, rulesPath, ref, format string) error {
+func runDeleteCheck(ctx context.Context, w, errw io.Writer, dbPath, rulesPath, ref, format string, explain bool) error {
 	if err := validateFormat(format); err != nil {
 		return err
 	}
@@ -71,6 +76,25 @@ func runDeleteCheck(ctx context.Context, w io.Writer, dbPath, rulesPath, ref, fo
 		return err
 	}
 	code := deleteCheckExitCode(ctx, st, scanID, ent.ID, res)
+	var llmText string
+	if explain {
+		payload := map[string]any{
+			"ref":       ref,
+			"kind":      ent.Kind,
+			"name":      ent.Name,
+			"identity":  ent.IdentityKey,
+			"verdict":   normalizeResult(res),
+			"task":      "Explain this verdict to a server operator: why this state, what the blockers and blind spots mean, and what to check next.",
+		}
+		text, err := llmExplain(ctx, payload)
+		if err != nil {
+			if errors.Is(err, llm.ErrNotConfigured) {
+				return err
+			}
+			_, _ = fmt.Fprintln(errw, "llm explain failed (continuing without):", err)
+		}
+		llmText = text
+	}
 	if format == formatJSON {
 		out := deleteCheckJSON{
 			Result:   normalizeResult(res),
@@ -81,11 +105,21 @@ func runDeleteCheck(ctx context.Context, w io.Writer, dbPath, rulesPath, ref, fo
 			Name:     ent.Name,
 			ExitCode: code,
 		}
+		if explain {
+			out.LLMExplain = &llmExplainJSON{Label: labelExplanation, Text: llmText}
+		}
 		if err := writeJSON(w, out); err != nil {
 			return err
 		}
-	} else if err := printDeleteCheck(w, res); err != nil {
-		return err
+	} else {
+		if err := printDeleteCheck(w, res); err != nil {
+			return err
+		}
+		if explain && llmText != "" {
+			if err := printLLMExplain(w, labelExplanation, llmText); err != nil {
+				return err
+			}
+		}
 	}
 	if code != ExitOK {
 		return attention(fmt.Errorf("verdict %s needs attention", res.State))
@@ -113,12 +147,13 @@ func deleteCheckExitCode(ctx context.Context, st *store.Store, scanID, entityID 
 // deleteCheckJSON is the --format json shape for delete-check.
 type deleteCheckJSON struct {
 	verdict.Result
-	ScanID   int64  `json:"scan_id"`
-	Ref      string `json:"ref"`
-	Identity string `json:"identity"`
-	Kind     string `json:"kind"`
-	Name     string `json:"name"`
-	ExitCode int    `json:"exit_code"`
+	ScanID    int64          `json:"scan_id"`
+	Ref       string         `json:"ref"`
+	Identity  string         `json:"identity"`
+	Kind      string         `json:"kind"`
+	Name      string         `json:"name"`
+	ExitCode  int            `json:"exit_code"`
+	LLMExplain *llmExplainJSON `json:"llm_explain,omitempty"`
 }
 
 // normalizeResult replaces nil slices with empty ones so the JSON

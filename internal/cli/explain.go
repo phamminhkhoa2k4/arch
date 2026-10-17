@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"archaeologist/internal/llm"
 	"archaeologist/internal/store"
 )
 
@@ -16,22 +18,26 @@ import (
 // blind spots from the latest scan.
 func newExplainCmd() *cobra.Command {
 	var dbPath string
+	var explain bool
 	cmd := &cobra.Command{
 		Use:   "explain <component>",
 		Short: "Show dependencies, evidence, and blind spots for a component",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			format, _ := cmd.Flags().GetString("format")
-			return runExplain(cmd.Context(), cmd.OutOrStdout(), dbPath, args[0], format)
+			return runExplain(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(),
+				dbPath, args[0], format, explain)
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
 		"path to the SQLite evidence database")
+	cmd.Flags().BoolVar(&explain, "explain", false,
+		"ask the configured LLM for a plain-language explanation (needs ARCHAEOLOGIST_LLM_API_KEY)")
 	addFormatFlag(cmd)
 	return cmd
 }
 
-func runExplain(ctx context.Context, w io.Writer, dbPath, ref, format string) error {
+func runExplain(ctx context.Context, w, errw io.Writer, dbPath, ref, format string, explain bool) error {
 	if err := validateFormat(format); err != nil {
 		return err
 	}
@@ -61,10 +67,40 @@ func runExplain(ctx context.Context, w io.Writer, dbPath, ref, format string) er
 	if err != nil {
 		return err
 	}
-	if format == formatJSON {
-		return writeJSON(w, explainJSON(scanID, ent, evid, neighbors, blinds))
+	payload := explainJSON(scanID, ent, evid, neighbors, blinds)
+	var llmText, label string
+	if explain {
+		label = labelExplanation
+		if ent.Kind == "script" && len(neighbors) == 0 {
+			label = labelHypothesis
+		}
+		text, err := llmExplain(ctx, map[string]any{
+			"component": payload,
+			"task": "Hypothesise what this component does and why it exists, based only on the data. " +
+				"Say clearly when the data is too thin to be sure.",
+		})
+		if err != nil {
+			if errors.Is(err, llm.ErrNotConfigured) {
+				return err
+			}
+			_, _ = fmt.Fprintln(errw, "llm explain failed (continuing without):", err)
+		}
+		llmText = text
 	}
-	return printExplain(w, scanID, ent, evid, neighbors, blinds)
+	if format == formatJSON {
+		out := payload
+		if explain {
+			out["llm_explain"] = llmExplainJSON{Label: label, Text: llmText}
+		}
+		return writeJSON(w, out)
+	}
+	if err := printExplain(w, scanID, ent, evid, neighbors, blinds); err != nil {
+		return err
+	}
+	if explain && llmText != "" {
+		return printLLMExplain(w, label, llmText)
+	}
+	return nil
 }
 
 // explainJSON is the --format json shape for explain.

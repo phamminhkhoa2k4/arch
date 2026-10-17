@@ -11,12 +11,12 @@ import (
 	"testing"
 )
 
-// The product's only HTTP client lives in the docker client; the web
-// UI server is the only HTTP server (local listen, no client calls).
-// Nothing else in internal/ may import net/http (test fakes excluded).
-// net/rpc is banned everywhere. net.Dial calls are limited to the two
-// documented sites: the doctor's unix-socket probe and the docker
-// client's socket dialer.
+// The product's HTTP clients are the docker socket client, the web
+// UI server (local listen), and the opt-in LLM explainer (off unless
+// configured). Nothing else in internal/ may import net/http (test
+// fakes excluded). net/rpc is banned everywhere. net.Dial calls are
+// limited to the two documented sites: the doctor's unix-socket probe
+// and the docker client's socket dialer.
 func TestImportBoundary(t *testing.T) {
 	root := filepath.Join("..", "..", "internal")
 	httpPkg := regexp.MustCompile(`"net/http"`)
@@ -25,6 +25,7 @@ func TestImportBoundary(t *testing.T) {
 	allowedHTTPPrefix := []string{
 		filepath.Join(root, "docker", "client.go"),
 		filepath.Join(root, "webui") + string(filepath.Separator),
+		filepath.Join(root, "llm") + string(filepath.Separator),
 	}
 	allowedDial := map[string]bool{
 		filepath.Join(root, "docker", "client.go"): true,
