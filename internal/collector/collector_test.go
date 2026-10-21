@@ -88,6 +88,9 @@ func TestRunCallsCollectorThroughInterface(t *testing.T) {
 	if res.Partial() {
 		t.Fatalf("unexpected failure: %v", res.Failed)
 	}
+	if res.Failed == nil {
+		t.Fatal("Failed must be an empty slice, not nil, for JSON output")
+	}
 	if len(sink.entities) != 1 || sink.entities[0].Name != "init" {
 		t.Fatalf("entities = %+v", sink.entities)
 	}

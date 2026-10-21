@@ -21,7 +21,8 @@ type Prefetcher interface {
 // RunResult summarizes one collect pass.
 type RunResult struct {
 	// Failed lists collectors that returned an error; each failure is also
-	// recorded as a blind spot so the scan continues.
+	// recorded as a blind spot so the scan continues. Run keeps it non-nil
+	// so serialized results emit an empty array when every collector works.
 	Failed []string
 }
 
@@ -50,7 +51,7 @@ func Versions(cs []Collector) string {
 // reason = error) and recorded in the result instead of aborting the scan,
 // so one broken source never crashes the whole run.
 func Run(ctx context.Context, cs []Collector, sink Sink) (RunResult, error) {
-	var res RunResult
+	res := RunResult{Failed: []string{}}
 	pctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Add(1)
