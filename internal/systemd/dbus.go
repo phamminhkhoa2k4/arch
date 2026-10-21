@@ -2,7 +2,6 @@ package systemd
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -35,59 +34,50 @@ const (
 )
 
 func (b *DBusBus) Units() ([]UnitStatus, error) {
+	loaded, err := b.LoadedUnits()
+	if err != nil {
+		return nil, err
+	}
+	files, err := b.UnitFiles()
+	if err != nil {
+		return nil, err
+	}
+	return MergeUnits(loaded, files), nil
+}
+
+// LoadedUnits reads the runtime unit list and fills the one property
+// ListUnits omits: ActiveEnterTimestamp. Only active units need a
+// round trip, so a host with hundreds of inactive units stays cheap.
+func (b *DBusBus) LoadedUnits() ([]UnitStatus, error) {
 	conn, err := dbus.SystemBus()
 	if err != nil {
 		return nil, fmt.Errorf("connect system bus: %w", err)
 	}
 	mgr := conn.Object(systemdDest, systemdPath)
-
 	loaded, err := listUnits(mgr)
 	if err != nil {
 		return nil, err
 	}
-	files, err := listUnitFiles(mgr)
+	for i := range loaded {
+		if loaded[i].ActiveState != "active" || loaded[i].ActiveEnterTimestamp != 0 {
+			continue
+		}
+		// Best effort: state facts already came from ListUnits;
+		// a missing optional timestamp stays absent.
+		_ = b.enrich(conn, &loaded[i])
+	}
+	return loaded, nil
+}
+
+// UnitFiles reads installed unit files (fragment path and enablement
+// state). It is the slow part of the D-Bus inventory, so callers that
+// already have LoadedUnits can overlap it with journal reads.
+func (b *DBusBus) UnitFiles() (map[string]UnitStatus, error) {
+	conn, err := dbus.SystemBus()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("connect system bus: %w", err)
 	}
-
-	byName := map[string]UnitStatus{}
-	loadedNames := map[string]bool{}
-	for _, st := range loaded {
-		loadedNames[st.Name] = true
-	}
-	for name, st := range files {
-		byName[name] = st
-	}
-	for _, st := range loaded {
-		prev := byName[st.Name]
-		st.UnitFileState = firstNonEmpty(st.UnitFileState, prev.UnitFileState)
-		if prev.FragmentPath != "" && st.FragmentPath == "" {
-			st.FragmentPath = prev.FragmentPath
-		}
-		st.Loaded = true
-		byName[st.Name] = st
-	}
-
-	// Enrich loaded units with properties (timestamp, fragment, file
-	// state). File-only units have no manager object to ask.
-	names := make([]string, 0, len(byName))
-	for n := range byName {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	out := make([]UnitStatus, 0, len(names))
-	for _, n := range names {
-		st := byName[n]
-		if loadedNames[n] && (st.FragmentPath == "" || st.ActiveEnterTimestamp == 0) {
-			if err := b.enrich(conn, &st); err != nil {
-				// Best effort: state facts already came from
-				// ListUnits; missing optional fields stay absent.
-				_ = err
-			}
-		}
-		out = append(out, st)
-	}
-	return out, nil
+	return listUnitFiles(conn.Object(systemdDest, systemdPath))
 }
 
 func listUnits(mgr dbus.BusObject) ([]UnitStatus, error) {

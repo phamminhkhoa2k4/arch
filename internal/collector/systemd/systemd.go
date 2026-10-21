@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"archaeologist/internal/collector"
@@ -37,6 +38,20 @@ type Collector struct {
 	loader  *systemd.Loader
 	index   ProcessIndex // nil skips manages edges (version-only use)
 	journal systemd.Journal
+
+	prefetchOnce sync.Once
+	pre          prefetched
+}
+
+// prefetched is the read-only inventory gathered before Collect. All
+// fields are written once by ensurePrefetch and read after it returns.
+type prefetched struct {
+	statuses   []systemd.UnitStatus
+	statusErr  error
+	journals   map[string]journalRead
+	attempted  int
+	blind      string
+	journalErr error
 }
 
 // New returns the systemd collector. index may be nil only when the
@@ -53,11 +68,214 @@ func (c *Collector) Version() string { return "1.1.0" }
 // depDirectives are the unit-file directives that build depends_on.
 var depDirectives = []string{"Requires", "Wants", "After"}
 
-func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
+// unitLoadWorkers bounds concurrent unit-file reads; the emit pass
+// stays serial, so only the disk reads overlap.
+const unitLoadWorkers = 8
+
+// Prefetch gathers the unit inventory and journal facts while other
+// collectors run. It never touches the sink.
+func (c *Collector) Prefetch(ctx context.Context) { c.ensurePrefetch(ctx) }
+
+// ensurePrefetch runs the read-only inventory exactly once. Collect
+// calls it too, so a directly-driven collector (tests) still works.
+func (c *Collector) ensurePrefetch(ctx context.Context) {
+	c.prefetchOnce.Do(func() { c.pre = c.gather(ctx) })
+}
+
+func (c *Collector) gather(ctx context.Context) prefetched {
+	var out prefetched
+	sortByName := func(st []systemd.UnitStatus) {
+		sort.Slice(st, func(i, j int) bool { return st[i].Name < st[j].Name })
+	}
+
+	if sb, ok := c.bus.(systemd.SplitBus); ok {
+		loaded, err := sb.LoadedUnits()
+		if err != nil {
+			out.statusErr = err
+			return out
+		}
+		sortByName(loaded)
+		// Journal reads depend only on the loaded list, not on unit
+		// files: overlap them with the slower ListUnitFiles call.
+		active := activeUnitNames(loaded, c.journal != nil)
+		done := make(chan prefetched, 1)
+		go func() {
+			j, a, b, e := c.readJournals(ctx, active)
+			done <- prefetched{journals: j, attempted: a, blind: b, journalErr: e}
+		}()
+		files, ferr := sb.UnitFiles()
+		jr := <-done
+		out.journals, out.attempted, out.blind, out.journalErr =
+			jr.journals, jr.attempted, jr.blind, jr.journalErr
+		if ferr != nil {
+			out.statusErr = ferr
+			return out
+		}
+		out.statuses = systemd.MergeUnits(loaded, files)
+		return out
+	}
+
 	statuses, err := c.bus.Units()
 	if err != nil {
-		return fmt.Errorf("read units over D-Bus: %w", err)
+		out.statusErr = err
+		return out
 	}
+	sortByName(statuses)
+	out.statuses = statuses
+	out.journals, out.attempted, out.blind, out.journalErr =
+		c.readJournals(ctx, activeUnitNames(statuses, c.journal != nil))
+	return out
+}
+
+// activeUnitNames lists units worth a journal read: active units whose
+// name passes the journalctl argument guard.
+func activeUnitNames(statuses []systemd.UnitStatus, hasJournal bool) []string {
+	if !hasJournal {
+		return nil
+	}
+	var out []string
+	for _, st := range statuses {
+		if st.ActiveState == "active" && systemd.ValidUnitName(st.Name) {
+			out = append(out, st.Name)
+		}
+	}
+	return out
+}
+
+type unitLoad struct {
+	merged *systemd.Merged
+	err    error
+}
+
+// execFactWorkers bounds concurrent target reads; hashing is CPU-bound,
+// so a small pool avoids starving the emit loop on low-core hosts.
+const execFactWorkers = 4
+
+// execTargetsFromLoads parses every loaded unit once and returns the
+// distinct ExecStart targets. Parse failures and unresolved names are
+// skipped here: the emit pass re-parses and records their blind spots.
+func execTargetsFromLoads(loads map[string]unitLoad) []string {
+	seen := map[string]bool{}
+	var out []string
+	for name, lr := range loads {
+		if lr.err != nil || lr.merged == nil {
+			continue
+		}
+		m := lr.merged
+		env := systemd.EnvMap(m.All("Environment"))
+		spec := systemd.Specifiers(name)
+		for _, d := range m.Get("ExecStart") {
+			ex, err := systemd.ParseExec(d.Value, d.Line, d.File)
+			if err != nil {
+				continue
+			}
+			target, ok := systemd.Expand(ex.Path, env, spec)
+			if !ok || target == "" || seen[target] {
+				continue
+			}
+			seen[target] = true
+			out = append(out, target)
+		}
+	}
+	return out
+}
+
+// readExecFacts reads and fingerprints each target once. A target that
+// cannot be read or classified stays out of the map so the emit pass
+// can report the precise blind spot.
+func (c *Collector) readExecFacts(ctx context.Context, targets []string) map[string]execFact {
+	out := make(map[string]execFact, len(targets))
+	if len(targets) == 0 {
+		return out
+	}
+	workers := execFactWorkers
+	if len(targets) < workers {
+		workers = len(targets)
+	}
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for target := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				content, err := c.loader.ReadFile(target)
+				if err != nil {
+					continue
+				}
+				kind, ok := systemd.Classify(content)
+				if !ok {
+					continue
+				}
+				fact := execFact{kind: kind, sha: sha256Hex(content)}
+				mu.Lock()
+				out[target] = fact
+				mu.Unlock()
+			}
+		}()
+	}
+feed:
+	for _, target := range targets {
+		select {
+		case jobs <- target:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return out
+}
+
+// loadUnitFiles reads every unit file in a small worker pool. The
+// result map is fully built before the caller emits, so sink writes
+// stay in the existing order.
+func (c *Collector) loadUnitFiles(statuses []systemd.UnitStatus) map[string]unitLoad {
+	out := make(map[string]unitLoad, len(statuses))
+	if len(statuses) == 0 {
+		return out
+	}
+	workers := unitLoadWorkers
+	if len(statuses) < workers {
+		workers = len(statuses)
+	}
+	jobs := make(chan systemd.UnitStatus)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for st := range jobs {
+				m, err := c.loader.Load(st.Name, st.FragmentPath)
+				mu.Lock()
+				out[st.Name] = unitLoad{merged: m, err: err}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, st := range statuses {
+		jobs <- st
+	}
+	close(jobs)
+	wg.Wait()
+	return out
+}
+
+func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
+	c.ensurePrefetch(ctx)
+	pre := c.pre
+	if pre.statusErr != nil {
+		return fmt.Errorf("read units over D-Bus: %w", pre.statusErr)
+	}
+	if pre.journalErr != nil {
+		return pre.journalErr
+	}
+	statuses := pre.statuses
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
 
 	refs := map[string]bool{}
@@ -74,13 +292,25 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 	}
 
 	// Pass 1: every unit becomes an entity with its state evidence.
-	// Active units also consult the journal for last_log_at;
-	// the first read failure yields one host-wide blind spot and the
-	// remaining units are skipped instead of hammering a broken source.
+	// Active units also consult the journal for last_log_at; the first
+	// read failure yields one host-wide blind spot and the remaining
+	// units are skipped instead of hammering a broken source.
 	present := map[string]bool{}
 	merged := map[string]*systemd.Merged{}
-	journalBlindErr := ""
-	journalAttempted := 0
+	journals, journalAttempted, journalBlindErr := pre.journals, pre.attempted, pre.blind
+
+	// Unit files are independent reads: load them in a bounded pool so
+	// the ordered emit pass below never waits on disk. Writes stay
+	// serial in this goroutine.
+	loads := c.loadUnitFiles(statuses)
+
+	// ExecStart targets are independent files: read and hash them in
+	// the background while pass 1 writes unit entities. Pass 2 joins
+	// the result before emitting, so sink writes stay serial.
+	execDone := make(chan map[string]execFact, 1)
+	go func() {
+		execDone <- c.readExecFacts(ctx, execTargetsFromLoads(loads))
+	}()
 	for _, st := range statuses {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -88,7 +318,8 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 		key := "systemd_unit|" + st.Name
 		present[st.Name] = true
 
-		m, loadErr := c.loader.Load(st.Name, st.FragmentPath)
+		lr := loads[st.Name]
+		m, loadErr := lr.merged, lr.err
 		switch {
 		case loadErr == nil:
 			merged[st.Name] = m
@@ -134,24 +365,10 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 		var journalTS time.Time
 		var journalCursor string
 		journalOK := false
-		// Dash-prefixed names ("-.mount", the root mount) are valid
-		// units but fail the unit-name guard; skipping them keeps one
-		// odd unit from aborting every journal read on the host.
-		if c.journal != nil && st.ActiveState == "active" && journalBlindErr == "" &&
-			systemd.ValidUnitName(st.Name) {
-			journalAttempted++
-			ts, cursor, ok, jErr := c.journal.LastLine(ctx, st.Name)
-			switch {
-			case jErr != nil:
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				journalBlindErr = jErr.Error()
-			case ok:
-				journalOK = true
-				journalTS, journalCursor = ts, cursor
-				attrs["last_log_at"] = ts.Format(time.RFC3339)
-			}
+		if jr, ok := journals[st.Name]; ok && jr.ok {
+			journalTS, journalCursor = jr.ts, jr.cursor
+			journalOK = true
+			attrs["last_log_at"] = journalTS.Format(time.RFC3339)
 		}
 		polarity := collector.PolarityNeutral
 		if st.ActiveState == "active" {
@@ -219,6 +436,7 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 	}
 
 	// Pass 2: file-derived facts — ExecStart targets and dependencies.
+	facts := <-execDone
 	for _, st := range statuses {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -227,7 +445,7 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 		if m == nil {
 			continue
 		}
-		if err := c.emitExecs(sink, st.Name, m, emitEvidence); err != nil {
+		if err := c.emitExecs(sink, st.Name, m, emitEvidence, facts); err != nil {
 			return err
 		}
 		if err := c.emitDeps(sink, st.Name, m, present, emitEvidence); err != nil {
@@ -239,6 +457,14 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 	return c.emitManages(sink, present, refs)
 }
 
+// execFact is the content-derived part of an ExecStart target: its kind
+// and fingerprint. Several units commonly share one binary, and hashing
+// a large executable is far more expensive than a map lookup.
+type execFact struct {
+	kind string
+	sha  string
+}
+
 // emitExecs resolves every ExecStart into a script/binary entity and a
 // runs_as edge; unresolvable cases become blind spots.
 func (c *Collector) emitExecs(
@@ -246,6 +472,7 @@ func (c *Collector) emitExecs(
 	unit string,
 	m *systemd.Merged,
 	emitEvidence func(string, collector.Evidence) error,
+	facts map[string]execFact,
 ) error {
 	key := "systemd_unit|" + unit
 	env := systemd.EnvMap(m.All("Environment"))
@@ -311,24 +538,30 @@ func (c *Collector) emitExecs(
 			continue
 		}
 
-		content, err := c.loader.ReadFile(target)
-		if err != nil {
-			reason := "exec_start_unreadable"
-			if errors.Is(err, os.ErrNotExist) {
-				reason = "exec_start_not_found"
+		fact, cached := facts[target]
+		if !cached {
+			content, err := c.loader.ReadFile(target)
+			if err != nil {
+				reason := "exec_start_unreadable"
+				if errors.Is(err, os.ErrNotExist) {
+					reason = "exec_start_not_found"
+				}
+				if bErr := blind(reason, map[string]string{"path": target, "error": err.Error()}); bErr != nil {
+					return bErr
+				}
+				continue
 			}
-			if bErr := blind(reason, map[string]string{"path": target, "error": err.Error()}); bErr != nil {
-				return bErr
+			kind, kindOK := systemd.Classify(content)
+			if !kindOK {
+				if bErr := blind("exec_start_unknown_kind", map[string]string{"path": target}); bErr != nil {
+					return bErr
+				}
+				continue
 			}
-			continue
+			fact = execFact{kind: kind, sha: sha256Hex(content)}
+			facts[target] = fact
 		}
-		kind, kindOK := systemd.Classify(content)
-		if !kindOK {
-			if bErr := blind("exec_start_unknown_kind", map[string]string{"path": target}); bErr != nil {
-				return bErr
-			}
-			continue
-		}
+		kind := fact.kind
 
 		execRef := fmt.Sprintf("unit-exec:%s:%d", unit, d.Line)
 		if err := emitEvidence(execRef, collector.Evidence{
@@ -350,7 +583,7 @@ func (c *Collector) emitExecs(
 			Kind:        kind,
 			Name:        target,
 			IdentityKey: scriptKey,
-			Fingerprint: sha256Hex(content),
+			Fingerprint: fact.sha,
 			Attributes: map[string]string{
 				"path": target,
 				"unit": unit,
@@ -367,7 +600,7 @@ func (c *Collector) emitExecs(
 			RawRef:            target,
 			Value: map[string]string{
 				"kind":   kind,
-				"sha256": sha256Hex(content),
+				"sha256": fact.sha,
 				"unit":   unit,
 			},
 		}); err != nil {
@@ -522,6 +755,92 @@ func normalizeUnitName(name string) string {
 func sha256Hex(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
+}
+
+// journalRead is one unit's newest journal entry.
+type journalRead struct {
+	ts     time.Time
+	cursor string
+	ok     bool
+}
+
+// journalWorkers bounds concurrent journalctl calls. journalctl is a
+// short-lived process per unit, so a modest pool keeps the scan fast on
+// hosts with hundreds of units without spawning them all at once.
+const journalWorkers = 16
+
+// readJournals queries the journal for every active unit. The first
+// read is sequential so a broken journal still produces exactly one
+// blind spot without hammering the source; the rest run in a bounded
+// worker pool. Results are keyed by unit and emitted in status order
+// by the caller, so the output stays deterministic.
+func (c *Collector) readJournals(ctx context.Context, units []string) (map[string]journalRead, int, string, error) {
+	out := make(map[string]journalRead, len(units))
+	if c.journal == nil || len(units) == 0 {
+		return out, 0, "", nil
+	}
+	ts, cursor, ok, err := c.journal.LastLine(ctx, units[0])
+	attempted := 1
+	if err != nil {
+		if ctx.Err() != nil {
+			return out, attempted, "", ctx.Err()
+		}
+		return out, attempted, err.Error(), nil
+	}
+	if ok {
+		out[units[0]] = journalRead{ts: ts, cursor: cursor, ok: true}
+	}
+	rest := units[1:]
+	if len(rest) == 0 {
+		return out, attempted, "", nil
+	}
+
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan string)
+	var mu sync.Mutex
+	var firstErr error
+	var wg sync.WaitGroup
+	for i := 0; i < journalWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for unit := range jobs {
+				ts, cursor, ok, err := c.journal.LastLine(workCtx, unit)
+				mu.Lock()
+				attempted++
+				if err != nil {
+					if firstErr == nil {
+						firstErr = err
+					}
+					mu.Unlock()
+					cancel()
+					return
+				}
+				if ok {
+					out[unit] = journalRead{ts: ts, cursor: cursor, ok: true}
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+feed:
+	for _, unit := range rest {
+		select {
+		case jobs <- unit:
+		case <-workCtx.Done():
+			break feed
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	if firstErr != nil {
+		if ctx.Err() != nil {
+			return out, attempted, "", ctx.Err()
+		}
+		return out, attempted, firstErr.Error(), nil
+	}
+	return out, attempted, "", nil
 }
 
 func nowRFC3339() string {

@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"archaeologist/internal/collector"
@@ -41,6 +42,8 @@ type Collector struct {
 	lastRun  LastRun         // nil: no journal/systemd probing
 	cronRuns map[string]time.Time
 	probed   bool
+
+	prefetchOnce sync.Once
 }
 
 // New creates the cron collector. fsys may be nil (reads the real
@@ -68,6 +71,24 @@ func (c *Collector) SetLastRun(lr LastRun) { c.lastRun = lr }
 // Version implements collector.Collector.
 func (c *Collector) Version() string { return "1.0.0" }
 
+// Prefetch warms the cron journal while earlier collectors run. The
+// read is external only; Collect still emits in its own order.
+func (c *Collector) Prefetch(ctx context.Context) {
+	c.prefetchOnce.Do(func() { c.loadCronRuns(ctx) })
+}
+
+// loadCronRuns reads the cron journal once per scan; an unreadable
+// journal leaves probed=false so last_run_at is absent, never guessed.
+func (c *Collector) loadCronRuns(ctx context.Context) {
+	c.cronRuns, c.probed = nil, false
+	if c.lastRun == nil {
+		return
+	}
+	if runs, err := c.lastRun.CronRuns(ctx); err == nil {
+		c.cronRuns, c.probed = runs, true
+	}
+}
+
 // Collect reads every crontab source once, then every timer unit,
 // and writes the corresponding entities and their references.
 func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
@@ -75,12 +96,7 @@ func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
 	c.seen = map[string]bool{}
 
 	// One journal read per scan feeds every job's last_run_at.
-	c.cronRuns, c.probed = nil, false
-	if c.lastRun != nil {
-		if runs, err := c.lastRun.CronRuns(ctx); err == nil {
-			c.cronRuns, c.probed = runs, true
-		}
-	}
+	c.prefetchOnce.Do(func() { c.loadCronRuns(ctx) })
 
 	cfg := c.loader.Load()
 	for _, fe := range cfg.Errors {

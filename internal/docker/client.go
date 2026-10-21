@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -147,18 +148,39 @@ func (c *Client) getRaw(path string, query url.Values, limit int64) ([]byte, err
 
 // Containers lists every container (all=true so stopped ones count)
 // and enriches each with inspect facts (restart policy, mounts,
-// networks, timestamps).
+// networks, timestamps). Inspects run in a small pool; result order
+// stays the list order.
 func (c *Client) Containers() ([]Container, error) {
 	var list []Container
 	if err := c.get("/containers/json", url.Values{"all": {"true"}}, &list); err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
+	if len(list) == 0 {
+		return list, nil
+	}
+	const workers = 8
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	errs := make([]error, len(list))
 	for i := range list {
-		ins, err := c.inspect(list[i].ID)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ins, err := c.inspect(list[i].ID)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			list[i].applyInspect(ins)
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
 		if err != nil {
 			return nil, fmt.Errorf("inspect container: %w", err)
 		}
-		list[i].applyInspect(ins)
 	}
 	return list, nil
 }

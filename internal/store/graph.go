@@ -106,6 +106,14 @@ type ChainRow struct {
 	Reversed  []bool
 }
 
+// placeholders returns n comma-separated SQL bind placeholders.
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
 // Chain walks undirected paths from startID for up to maxDepth hops
 // using one recursive CTE. A node is never visited
 // twice on the same path, so cycles terminate. Every path is returned
@@ -114,9 +122,33 @@ type ChainRow struct {
 // listener on the way — must not lose it to a merged end node.
 // Results are ordered by depth then path, fully deterministic.
 func (s *Store) Chain(ctx context.Context, scanID, startID int64, maxDepth int) ([]ChainRow, error) {
+	return s.chain(ctx, scanID, startID, maxDepth, nil)
+}
+
+// ChainKinds is Chain restricted to edges of the given kinds. Callers
+// that only pattern-match a small set of edge kinds use it to keep the
+// walk from exploding over unrelated dense edges (depends_on graphs).
+func (s *Store) ChainKinds(ctx context.Context, scanID, startID int64, maxDepth int, kinds []string) ([]ChainRow, error) {
+	return s.chain(ctx, scanID, startID, maxDepth, kinds)
+}
+
+func (s *Store) chain(ctx context.Context, scanID, startID int64, maxDepth int, kinds []string) ([]ChainRow, error) {
 	if maxDepth < 1 {
 		return nil, nil
 	}
+	kindFilter := ""
+	kindArgs := make([]any, 0, len(kinds))
+	if len(kinds) > 0 {
+		kindFilter = " AND e.kind IN (" + placeholders(len(kinds)) + ")"
+		for _, k := range kinds {
+			kindArgs = append(kindArgs, k)
+		}
+	}
+	args := []any{startID, startID, startID, startID, scanID, startID, startID}
+	args = append(args, kindArgs...)
+	args = append(args, scanID)
+	args = append(args, kindArgs...)
+	args = append(args, maxDepth)
 	rows, err := s.db.QueryContext(ctx,
 		`WITH RECURSIVE walk(depth, node, ids, kinds, strengths, revs) AS (
 		   SELECT 1,
@@ -128,7 +160,7 @@ func (s *Store) Chain(ctx context.Context, scanID, startID int64, maxDepth int) 
 		     '|' || CASE WHEN e.src_id = ? THEN '0' ELSE '1' END || '|'
 		   FROM edges e
 		   WHERE e.scan_id = ? AND (e.src_id = ? OR e.dst_id = ?)
-		     AND e.src_id <> e.dst_id
+		     AND e.src_id <> e.dst_id`+kindFilter+`
 		   UNION ALL
 		   SELECT w.depth + 1,
 		     CASE WHEN e.src_id = w.node THEN e.dst_id ELSE e.src_id END,
@@ -139,7 +171,7 @@ func (s *Store) Chain(ctx context.Context, scanID, startID int64, maxDepth int) 
 		   FROM walk w
 		   JOIN edges e
 		     ON e.scan_id = ?
-		       AND (e.src_id = w.node OR e.dst_id = w.node)
+		       AND (e.src_id = w.node OR e.dst_id = w.node)`+kindFilter+`
 		   WHERE w.depth < ?
 		     AND instr(w.ids,
 		       '|' || CAST(CASE WHEN e.src_id = w.node THEN e.dst_id ELSE e.src_id END AS TEXT) || '|') = 0
@@ -147,8 +179,7 @@ func (s *Store) Chain(ctx context.Context, scanID, startID int64, maxDepth int) 
 		 SELECT depth, ids, kinds, strengths, revs
 		 FROM walk
 		 ORDER BY depth, ids`,
-		startID, startID, startID, startID, scanID, startID, startID,
-		scanID, maxDepth)
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("chain: %w", err)
 	}

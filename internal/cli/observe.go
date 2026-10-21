@@ -97,7 +97,7 @@ func runObserve(ctx context.Context, w io.Writer, dbPath string, interval time.D
 	if interval <= 0 {
 		return fmt.Errorf("--interval must be greater than 0")
 	}
-	st, err := store.Open(ctx, dbPath)
+	st, err := store.OpenBulk(ctx, dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}

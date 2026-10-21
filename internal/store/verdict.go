@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"archaeologist/internal/verdict"
@@ -16,6 +20,21 @@ import (
 // the edge kinds blockers pattern-match on, observation buckets, and
 // the observation window.
 func (s *Store) BuildInput(ctx context.Context, scanID, entityID int64) (verdict.Input, error) {
+	win, err := s.inputWindow(ctx, scanID)
+	if err != nil {
+		return verdict.Input{}, err
+	}
+	return s.BuildInputWithWindow(ctx, scanID, entityID, win)
+}
+
+// Window returns the observation window for a scan. Bulk callers compute
+// it once instead of once per entity (it does not depend on the entity).
+func (s *Store) Window(ctx context.Context, scanID int64) (verdict.Window, error) {
+	return s.inputWindow(ctx, scanID)
+}
+
+// BuildInputWithWindow is BuildInput with a precomputed scan window.
+func (s *Store) BuildInputWithWindow(ctx context.Context, scanID, entityID int64, win verdict.Window) (verdict.Input, error) {
 	in := verdict.Input{EntityID: entityID, Attributes: map[string]string{}}
 
 	var attrsJSON string
@@ -46,10 +65,285 @@ func (s *Store) BuildInput(ctx context.Context, scanID, entityID int64) (verdict
 	if in.Observations, err = s.inputObservations(ctx, entityID); err != nil {
 		return verdict.Input{}, err
 	}
-	if in.Window, err = s.inputWindow(ctx, scanID); err != nil {
-		return verdict.Input{}, err
-	}
+	in.Window = win
 	return in, nil
+}
+
+// BuildInputs gathers the inputs for every entity of a scan with one
+// query per fact table instead of one query per entity and fact. The
+// verdict loop stays entity-ordered and the per-entity slices keep the
+// exact ordering (evidence/blind/edge row ids) of the single-entity
+// builder, so results are observationally identical.
+func (s *Store) BuildInputs(ctx context.Context, scanID int64) (map[int64]verdict.Input, error) {
+	win, err := s.Window(ctx, scanID)
+	if err != nil {
+		return nil, err
+	}
+	inputs, err := s.loadInputEntities(ctx, scanID, win)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.bulkEvidence(ctx, scanID, inputs); err != nil {
+		return nil, err
+	}
+	if err := s.bulkBlinds(ctx, scanID, inputs); err != nil {
+		return nil, err
+	}
+	if err := s.bulkEdges(ctx, scanID, inputs); err != nil {
+		return nil, err
+	}
+	if err := s.bulkObservations(ctx, scanID, inputs); err != nil {
+		return nil, err
+	}
+
+	gates, err := s.pathGates(ctx, scanID)
+	if err != nil {
+		return nil, err
+	}
+	for id, in := range inputs {
+		if in.Paths, err = s.inputPathsWithGates(ctx, scanID, id, gates); err != nil {
+			return nil, err
+		}
+		inputs[id] = in
+	}
+	return inputs, nil
+}
+
+func (s *Store) loadInputEntities(ctx context.Context, scanID int64, win verdict.Window) (map[int64]verdict.Input, error) {
+	rs, err := s.db.QueryContext(ctx,
+		`SELECT id, kind, name, identity_key, attributes_json
+		 FROM entities WHERE scan_id = ? ORDER BY id`, scanID)
+	if err != nil {
+		return nil, fmt.Errorf("build input: entities: %w", err)
+	}
+	defer func() { _ = rs.Close() }()
+
+	inputs := map[int64]verdict.Input{}
+	for rs.Next() {
+		var (
+			id                     int64
+			kind, name, key, attrs string
+		)
+		if err := rs.Scan(&id, &kind, &name, &key, &attrs); err != nil {
+			return nil, fmt.Errorf("build input: entities: %w", err)
+		}
+		attributes := map[string]string{}
+		_ = json.Unmarshal([]byte(attrs), &attributes)
+		if attributes == nil {
+			attributes = map[string]string{}
+		}
+		inputs[id] = verdict.Input{
+			EntityID:    id,
+			Kind:        kind,
+			Name:        name,
+			IdentityKey: key,
+			Attributes:  attributes,
+			Window:      win,
+		}
+	}
+	if err := rs.Err(); err != nil {
+		return nil, fmt.Errorf("build input: entities: %w", err)
+	}
+	return inputs, nil
+}
+
+func (s *Store) bulkEvidence(ctx context.Context, scanID int64, inputs map[int64]verdict.Input) error {
+	rs, err := s.db.QueryContext(ctx,
+		`SELECT ev.entity_id, ev.id, ev.polarity, ev.channel, ev.strength,
+		        ev.observed_at, ev.raw_ref, ev.value_json
+		 FROM evidence ev
+		 JOIN entities e ON e.id = ev.entity_id
+		 WHERE e.scan_id = ?
+		 ORDER BY ev.entity_id, ev.id`, scanID)
+	if err != nil {
+		return fmt.Errorf("build input: evidence: %w", err)
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var entityID int64
+		var e verdict.Evidence
+		var valueJSON string
+		if err := rs.Scan(&entityID, &e.ID, &e.Polarity, &e.Channel, &e.Strength,
+			&e.ObservedAt, &e.RawRef, &valueJSON); err != nil {
+			return fmt.Errorf("build input: evidence: %w", err)
+		}
+		e.Value = map[string]string{}
+		if valueJSON != "" && valueJSON != "null" {
+			_ = json.Unmarshal([]byte(valueJSON), &e.Value)
+		}
+		if e.Value == nil {
+			e.Value = map[string]string{}
+		}
+		in, ok := inputs[entityID]
+		if !ok {
+			continue
+		}
+		in.Evidence = append(in.Evidence, e)
+		inputs[entityID] = in
+	}
+	if err := rs.Err(); err != nil {
+		return fmt.Errorf("build input: evidence: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) bulkBlinds(ctx context.Context, scanID int64, inputs map[int64]verdict.Input) error {
+	rs, err := s.db.QueryContext(ctx,
+		`SELECT b.entity_id, b.id, b.channel, b.reason, b.detail_json
+		 FROM blind_spots b
+		 JOIN entities e ON e.id = b.entity_id
+		 WHERE e.scan_id = ?
+		 ORDER BY b.entity_id, b.id`, scanID)
+	if err != nil {
+		return fmt.Errorf("build input: blind spots: %w", err)
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var entityID int64
+		var b verdict.Blind
+		var detailJSON string
+		if err := rs.Scan(&entityID, &b.ID, &b.Channel, &b.Reason, &detailJSON); err != nil {
+			return fmt.Errorf("build input: blind spots: %w", err)
+		}
+		b.Detail = map[string]string{}
+		if detailJSON != "" {
+			_ = json.Unmarshal([]byte(detailJSON), &b.Detail)
+		}
+		if b.Detail == nil {
+			b.Detail = map[string]string{}
+		}
+		in, ok := inputs[entityID]
+		if !ok {
+			continue
+		}
+		in.Blinds = append(in.Blinds, b)
+		inputs[entityID] = in
+	}
+	if err := rs.Err(); err != nil {
+		return fmt.Errorf("build input: blind spots: %w", err)
+	}
+	return nil
+}
+
+// bulkEdges reads every edge once and appends one fact to each endpoint
+// (direction relative to that endpoint). A self-loop keeps the single
+// "in" fact the per-entity query produces.
+func (s *Store) bulkEdges(ctx context.Context, scanID int64, inputs map[int64]verdict.Input) error {
+	rs, err := s.db.QueryContext(ctx,
+		`SELECT e.src_id, e.dst_id, e.kind, e.strength, e.evidence_id, ev.raw_ref,
+		        s.id, s.kind, s.name, s.attributes_json,
+		        COALESCE((SELECT GROUP_CONCAT(DISTINCT x.channel) FROM evidence x
+		                  WHERE x.entity_id = s.id AND x.polarity = 'in_use'), ''),
+		        d.id, d.kind, d.name, d.attributes_json,
+		        COALESCE((SELECT GROUP_CONCAT(DISTINCT x.channel) FROM evidence x
+		                  WHERE x.entity_id = d.id AND x.polarity = 'in_use'), '')
+		 FROM edges e
+		 JOIN entities s ON s.id = e.src_id
+		 JOIN entities d ON d.id = e.dst_id
+		 JOIN evidence ev ON ev.id = e.evidence_id
+		 WHERE e.scan_id = ?
+		 ORDER BY e.id`, scanID)
+	if err != nil {
+		return fmt.Errorf("build input: edges: %w", err)
+	}
+	defer func() { _ = rs.Close() }()
+
+	appendEdge := func(id int64, f verdict.EdgeFact) {
+		in, ok := inputs[id]
+		if !ok {
+			return
+		}
+		in.Edges = append(in.Edges, f)
+		inputs[id] = in
+	}
+	for rs.Next() {
+		var (
+			srcID, dstID                 int64
+			kind, strength, rawRef       string
+			evID                         int64
+			sID                          int64
+			sKind, sName, sAttrs, sInUse string
+			dID                          int64
+			dKind, dName, dAttrs, dInUse string
+		)
+		if err := rs.Scan(&srcID, &dstID, &kind, &strength, &evID, &rawRef,
+			&sID, &sKind, &sName, &sAttrs, &sInUse,
+			&dID, &dKind, &dName, &dAttrs, &dInUse); err != nil {
+			return fmt.Errorf("build input: edges: %w", err)
+		}
+		src := edgeNeighbor(sID, sKind, sName, sAttrs, sInUse)
+		dst := edgeNeighbor(dID, dKind, dName, dAttrs, dInUse)
+		if srcID == dstID {
+			// The per-entity CASE checks dst first, so a self-loop
+			// yields one inbound fact, never an extra outbound one.
+			appendEdge(srcID, verdict.EdgeFact{
+				Kind: kind, Strength: strength, Dir: "in",
+				EvidenceID: evID, RawRef: rawRef, Neighbor: src,
+			})
+			continue
+		}
+		appendEdge(srcID, verdict.EdgeFact{
+			Kind: kind, Strength: strength, Dir: "out",
+			EvidenceID: evID, RawRef: rawRef, Neighbor: dst,
+		})
+		appendEdge(dstID, verdict.EdgeFact{
+			Kind: kind, Strength: strength, Dir: "in",
+			EvidenceID: evID, RawRef: rawRef, Neighbor: src,
+		})
+	}
+	if err := rs.Err(); err != nil {
+		return fmt.Errorf("build input: edges: %w", err)
+	}
+	return nil
+}
+
+func edgeNeighbor(id int64, kind, name, attrsJSON, inUseCSV string) verdict.Neighbor {
+	attributes := map[string]string{}
+	_ = json.Unmarshal([]byte(attrsJSON), &attributes)
+	if attributes == nil {
+		attributes = map[string]string{}
+	}
+	return verdict.Neighbor{
+		ID:            id,
+		Kind:          kind,
+		Name:          name,
+		Attributes:    attributes,
+		InUseChannels: splitCSV(inUseCSV),
+	}
+}
+
+// bulkObservations keeps the twin lookup of the single-entity query:
+// buckets attached to any entity sharing the identity key still
+// contribute, ordered by observation id.
+func (s *Store) bulkObservations(ctx context.Context, scanID int64, inputs map[int64]verdict.Input) error {
+	rs, err := s.db.QueryContext(ctx,
+		`SELECT cur.id, o.id, o.last_seen_at, o.count
+		 FROM entities cur
+		 JOIN entities twin ON twin.identity_key = cur.identity_key
+		 JOIN observations o ON o.entity_id = twin.id
+		 WHERE cur.scan_id = ?
+		 ORDER BY cur.id, o.id`, scanID)
+	if err != nil {
+		return fmt.Errorf("build input: observations: %w", err)
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var entityID int64
+		var o verdict.Observation
+		if err := rs.Scan(&entityID, &o.ID, &o.LastSeenAt, &o.Count); err != nil {
+			return fmt.Errorf("build input: observations: %w", err)
+		}
+		in, ok := inputs[entityID]
+		if !ok {
+			continue
+		}
+		in.Observations = append(in.Observations, o)
+		inputs[entityID] = in
+	}
+	if err := rs.Err(); err != nil {
+		return fmt.Errorf("build input: observations: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) inputEvidence(ctx context.Context, entityID int64) ([]verdict.Evidence, error) {
@@ -148,14 +442,115 @@ func (s *Store) inputEdges(ctx context.Context, scanID, entityID int64) ([]verdi
 	return out, rs.Err()
 }
 
+// chainPathKey rebuilds the id sequence the recursive walk orders by,
+// so callers can merge walks of different edge shapes and sort them
+// back into the single-walk order.
+func chainPathKey(c ChainRow) string {
+	var b strings.Builder
+	for _, n := range c.Nodes {
+		b.WriteByte('|')
+		b.WriteString(strconv.FormatInt(n.ID, 10))
+	}
+	b.WriteByte('|')
+	return b.String()
+}
+
+// scanHasKind reports whether the scan contains an entity of any of
+// the given kinds. Used to skip optional path shapes (no listener in
+// the scan means no B6 path can exist).
+func (s *Store) scanHasKind(ctx context.Context, scanID int64, kinds []string) (bool, error) {
+	if len(kinds) == 0 {
+		return true, nil
+	}
+	args := []any{scanID}
+	for _, k := range kinds {
+		args = append(args, k)
+	}
+	var one int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT 1 FROM entities WHERE scan_id = ? AND kind IN (`+placeholders(len(kinds))+`) LIMIT 1`,
+		args...).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // inputPaths converts explain Chain rows into engine paths, keeping only
 // the edge kinds blockers pattern-match (B1 proxies/listens, B4
-// belongs/depends) and fetching the last hop's evidence for tracing.
-func (s *Store) inputPaths(ctx context.Context, scanID, entityID int64) ([]verdict.Path, error) {
-	chains, err := s.Chain(ctx, scanID, entityID, 4)
-	if err != nil {
-		return nil, fmt.Errorf("build input: chain: %w", err)
+// belongs/depends, B6 listens/manages). Each blocker only accepts
+// paths whose edge kinds are a subset of its own shape, so walking
+// the full graph once is wasted work — and on a host with a dense
+// depends_on graph it explodes. Three kind-filtered walks produce the
+// same candidate set for far less work; walks over a shape the scan
+// cannot satisfy (no listener, no nginx route, no compose service)
+// are skipped entirely.
+// pathGates is the per-scan presence check for optional path shapes:
+// a walk over a kind no entity has can never produce a blocker.
+type pathGates struct {
+	nginx    bool
+	compose  bool
+	listener bool
+}
+
+func (s *Store) pathGates(ctx context.Context, scanID int64) (pathGates, error) {
+	var g pathGates
+	var err error
+	if g.nginx, err = s.scanHasKind(ctx, scanID, []string{"nginx_route", "nginx_upstream"}); err != nil {
+		return g, fmt.Errorf("build input: chain: %w", err)
 	}
+	if g.compose, err = s.scanHasKind(ctx, scanID, []string{"compose_service"}); err != nil {
+		return g, fmt.Errorf("build input: chain: %w", err)
+	}
+	if g.listener, err = s.scanHasKind(ctx, scanID, []string{"listener"}); err != nil {
+		return g, fmt.Errorf("build input: chain: %w", err)
+	}
+	return g, nil
+}
+
+func (s *Store) inputPaths(ctx context.Context, scanID, entityID int64) ([]verdict.Path, error) {
+	gates, err := s.pathGates(ctx, scanID)
+	if err != nil {
+		return nil, err
+	}
+	return s.inputPathsWithGates(ctx, scanID, entityID, gates)
+}
+
+// inputPathsWithGates runs the three kind-filtered walks allowed by the
+// scan's entity kinds and merges them into single-walk order.
+func (s *Store) inputPathsWithGates(ctx context.Context, scanID, entityID int64, gates pathGates) ([]verdict.Path, error) {
+	type walk struct {
+		kinds []string
+		depth int
+		on    bool
+	}
+	walks := []walk{
+		{[]string{"proxies_to", "listens_on"}, 4, gates.nginx},
+		{[]string{"belongs_to", "depends_on"}, 4, gates.compose},
+		{[]string{"listens_on", "manages"}, 3, gates.listener},
+	}
+	var chains []ChainRow
+	for _, w := range walks {
+		if !w.on {
+			continue
+		}
+		rows, err := s.ChainKinds(ctx, scanID, entityID, w.depth, w.kinds)
+		if err != nil {
+			return nil, fmt.Errorf("build input: chain: %w", err)
+		}
+		chains = append(chains, rows...)
+	}
+	// Restore the single-walk order (depth, then node-id path) so the
+	// split stays observationally identical to one unfiltered walk.
+	sort.SliceStable(chains, func(i, j int) bool {
+		if chains[i].Depth != chains[j].Depth {
+			return chains[i].Depth < chains[j].Depth
+		}
+		return chainPathKey(chains[i]) < chainPathKey(chains[j])
+	})
 	kindsAllowed := map[string]bool{
 		"proxies_to": true, "listens_on": true, "belongs_to": true,
 		"depends_on": true, "manages": true,

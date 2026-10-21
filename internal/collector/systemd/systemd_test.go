@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -375,11 +376,15 @@ type fakeJournal struct {
 	lines   map[string]time.Time
 	cursors map[string]string
 	errs    map[string]error
-	calls   []string
+
+	mu    sync.Mutex
+	calls []string
 }
 
 func (j *fakeJournal) LastLine(_ context.Context, unit string) (time.Time, string, bool, error) {
+	j.mu.Lock()
 	j.calls = append(j.calls, unit)
+	j.mu.Unlock()
 	if err, ok := j.errs[unit]; ok {
 		return time.Time{}, "", false, err
 	}

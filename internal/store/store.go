@@ -23,10 +23,24 @@ type Store struct {
 
 // Open opens (or creates) the SQLite database at path and runs migrations.
 func Open(ctx context.Context, path string) (*Store, error) {
+	return open(ctx, path, "")
+}
+
+// OpenBulk opens the database for a bulk, regenerable writer (scan,
+// observe). WAL plus synchronous=NORMAL skips the per-commit fsync:
+// committed transactions still survive an application crash, only the
+// most recent ones can be lost on an OS crash or power loss, and a scan
+// can simply be rerun. Commands that persist user decisions (plan
+// confirm) use Open and keep the default FULL durability.
+func OpenBulk(ctx context.Context, path string) (*Store, error) {
+	return open(ctx, path, "&_pragma=synchronous(NORMAL)")
+}
+
+func open(ctx context.Context, path, extraPragma string) (*Store, error) {
 	// WAL lets a concurrent scan writer and the observe daemon write
 	// without the ping-pong that starved busy_timeout in journal mode
 	// DELETE; the timeout covers the residual writer-writer overlap.
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)%s", path, extraPragma)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)

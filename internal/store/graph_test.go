@@ -221,6 +221,54 @@ func TestChainTraversesAgainstEdgeDirection(t *testing.T) {
 	}
 }
 
+// ChainKinds keeps the walk inside the requested edge kinds: an
+// unrelated dense edge must not leak into any returned path.
+func TestChainKindsFiltersEdges(t *testing.T) {
+	s := openTemp(t)
+	k := newScan(t, s)
+	ctx := context.Background()
+
+	seedGraphEntities(t, k, "p|a", "p|b", "p|c")
+	seedGraphEdge(t, k, "p|a", "p|b", "listens_on", collector.StrengthDeterministic)
+	seedGraphEdge(t, k, "p|b", "p|c", "depends_on", collector.StrengthDeterministic)
+	seedGraphEdge(t, k, "p|a", "p|c", "manages", collector.StrengthDeterministic)
+
+	start := entityID(t, s, k.scanID, "p|a")
+	rows, err := s.ChainKinds(ctx, k.scanID, start, 3, []string{"listens_on", "manages"})
+	if err != nil {
+		t.Fatalf("chain kinds: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("want filtered walks, got none")
+	}
+	sawManages := false
+	for _, r := range rows {
+		for _, kind := range r.EdgeKinds {
+			if kind == "depends_on" {
+				t.Errorf("filtered walk contains depends_on: %+v", r.EdgeKinds)
+			}
+			if kind == "manages" {
+				sawManages = true
+			}
+		}
+	}
+	if !sawManages {
+		t.Error("filtered walk lost the manages edge")
+	}
+
+	all, err := s.ChainKinds(ctx, k.scanID, start, 3, nil)
+	if err != nil {
+		t.Fatalf("chain all kinds: %v", err)
+	}
+	plain, err := s.Chain(ctx, k.scanID, start, 3)
+	if err != nil {
+		t.Fatalf("chain: %v", err)
+	}
+	if !reflect.DeepEqual(all, plain) {
+		t.Error("ChainKinds(nil) differs from Chain")
+	}
+}
+
 // Cycles must terminate without ever revisiting a node on one path.
 func TestChainCycleTerminates(t *testing.T) {
 	s := openTemp(t)

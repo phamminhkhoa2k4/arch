@@ -126,7 +126,13 @@ CREATE TABLE IF NOT EXISTS plan_stages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_entities_scan_kind ON entities (scan_id, kind);
+CREATE INDEX IF NOT EXISTS idx_entities_identity ON entities (identity_key);
 CREATE INDEX IF NOT EXISTS idx_evidence_entity ON evidence (entity_id);
 CREATE INDEX IF NOT EXISTS idx_edges_scan ON edges (scan_id);
+CREATE INDEX IF NOT EXISTS idx_edges_scan_src ON edges (scan_id, src_id);
+CREATE INDEX IF NOT EXISTS idx_edges_scan_dst ON edges (scan_id, dst_id);
+CREATE INDEX IF NOT EXISTS idx_edges_scan_kind ON edges (scan_id, kind);
 CREATE INDEX IF NOT EXISTS idx_blind_spots_scan ON blind_spots (scan_id);
+CREATE INDEX IF NOT EXISTS idx_blind_spots_entity ON blind_spots (entity_id);
+CREATE INDEX IF NOT EXISTS idx_observations_entity ON observations (entity_id);
 CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings (scan_id);

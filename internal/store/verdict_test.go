@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -266,6 +267,65 @@ func TestWindowWithoutObservationsUsesFirstSeen(t *testing.T) {
 	}
 	if in.Window.Days < 60 {
 		t.Errorf("window days = %d, want ≥60 (2026-08-01 → 2026-10-08)", in.Window.Days)
+	}
+}
+
+func TestBuildInputsMatchesSingleEntity(t *testing.T) {
+	s := newVerdictStore(t)
+	ctx := context.Background()
+	_, scanID := seedVerdictScan(t, s, ctx)
+
+	unit := seedVerdictEntity(t, s, ctx, scanID, "systemd_unit", "svc.service",
+		map[string]string{"active_state": "active"})
+	proc := seedVerdictEntity(t, s, ctx, scanID, "process", "nginx",
+		map[string]string{"pid": "1"})
+	lis := seedVerdictEntity(t, s, ctx, scanID, "listener", ":::80",
+		map[string]string{"proto": "tcp"})
+	lonely := seedVerdictEntity(t, s, ctx, scanID, "script", "/srv/idle.sh", nil)
+
+	seedVerdictEvidence(t, s, ctx, unit, "systemd", "in_use", "deterministic",
+		"2026-10-08T00:00:00Z", "dbus:ListUnits", `{"active_state":"active"}`)
+	seedVerdictEvidence(t, s, ctx, proc, "procfs", "in_use", "deterministic",
+		"2026-10-08T00:00:01Z", "proc:1", `{}`)
+	seedVerdictEvidence(t, s, ctx, lis, "procfs", "in_use", "deterministic",
+		"2026-10-08T00:00:02Z", "proc/net/tcp", `{}`)
+	seedVerdictObservation(t, s, ctx, unit, 3, "2026-10-01T00:00:00Z", "2026-10-07T00:00:00Z")
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO blind_spots (scan_id, entity_id, channel, reason, detail_json, created_at)
+		 VALUES (?, ?, 'procfs', 'proc_unreadable', '{"pid":"1"}', '2026-10-08T00:00:00Z')`,
+		scanID, proc); err != nil {
+		t.Fatal(err)
+	}
+
+	addEdge := func(src, dst int64, kind, ref string) {
+		t.Helper()
+		ev := seedVerdictEvidence(t, s, ctx, src, "test", "neutral", "deterministic",
+			"2026-10-08T00:00:00Z", ref, `{}`)
+		if _, err := s.db.ExecContext(ctx,
+			`INSERT INTO edges (scan_id, src_id, dst_id, kind, strength, evidence_id)
+			 VALUES (?, ?, ?, ?, 'deterministic', ?)`,
+			scanID, src, dst, kind, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addEdge(unit, proc, "manages", "unit:manages")
+	addEdge(proc, lis, "listens_on", "proc:listens")
+
+	bulk, err := s.BuildInputs(ctx, scanID)
+	if err != nil {
+		t.Fatalf("BuildInputs: %v", err)
+	}
+	if len(bulk) != 4 {
+		t.Fatalf("inputs = %d entities, want 4", len(bulk))
+	}
+	for _, id := range []int64{unit, proc, lis, lonely} {
+		one, err := s.BuildInput(ctx, scanID, id)
+		if err != nil {
+			t.Fatalf("BuildInput(%d): %v", id, err)
+		}
+		if !reflect.DeepEqual(bulk[id], one) {
+			t.Errorf("entity %d: bulk input differs\n bulk: %+v\n  one: %+v", id, bulk[id], one)
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"archaeologist/internal/collector"
@@ -31,6 +32,24 @@ type Collector struct {
 	api    docker.API
 	loader *compose.Loader
 	index  Index
+
+	prefetchOnce sync.Once
+	snap         dockerSnapshot
+}
+
+// dockerSnapshot is the raw read-only inventory fetched before Collect.
+// Each endpoint keeps its own error so Collect reports failures in the
+// same order and with the same messages as a sequential read.
+type dockerSnapshot struct {
+	containers []docker.Container
+	images     []docker.Image
+	volumes    []docker.Volume
+	networks   []docker.Network
+
+	containersErr error
+	imagesErr     error
+	volumesErr    error
+	networksErr   error
 }
 
 // New creates a docker collector. loader may be nil (no compose
@@ -48,23 +67,48 @@ func (c *Collector) Name() string { return "docker" }
 // Version implements collector.Collector.
 func (c *Collector) Version() string { return "1.2.0" }
 
+// Prefetch reads the four independent inventory endpoints concurrently
+// while earlier collectors run. Only reads happen here; Collect still
+// turns the snapshot into entities and edges in one ordered pass.
+func (c *Collector) Prefetch(ctx context.Context) {
+	c.prefetchOnce.Do(func() { c.snap = c.readSnapshot() })
+}
+
+func (c *Collector) readSnapshot() dockerSnapshot {
+	var s dockerSnapshot
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() { defer wg.Done(); s.containers, s.containersErr = c.api.Containers() }()
+	go func() { defer wg.Done(); s.images, s.imagesErr = c.api.Images() }()
+	go func() { defer wg.Done(); s.volumes, s.volumesErr = c.api.Volumes() }()
+	go func() { defer wg.Done(); s.networks, s.networksErr = c.api.Networks() }()
+	wg.Wait()
+	return s
+}
+
+func (c *Collector) ensureSnapshot() dockerSnapshot {
+	c.prefetchOnce.Do(func() { c.snap = c.readSnapshot() })
+	return c.snap
+}
+
 // Collect reads the whitelisted endpoints once and writes entities,
 // findings and edges. Any API failure is returned so the run loop can
 // record one collector-level blind spot instead of guessing.
 func (c *Collector) Collect(ctx context.Context, sink collector.Sink) error {
-	containers, err := c.api.Containers()
+	snap := c.ensureSnapshot()
+	containers, err := snap.containers, snap.containersErr
 	if err != nil {
 		return fmt.Errorf("docker containers: %w", err)
 	}
-	images, err := c.api.Images()
+	images, err := snap.images, snap.imagesErr
 	if err != nil {
 		return fmt.Errorf("docker images: %w", err)
 	}
-	volumes, err := c.api.Volumes()
+	volumes, err := snap.volumes, snap.volumesErr
 	if err != nil {
 		return fmt.Errorf("docker volumes: %w", err)
 	}
-	networks, err := c.api.Networks()
+	networks, err := snap.networks, snap.networksErr
 	if err != nil {
 		return fmt.Errorf("docker networks: %w", err)
 	}
@@ -400,9 +444,9 @@ func (c *Collector) collectUnused(
 		}
 		ref := "image-list:" + img.ID
 		attrs := map[string]string{
-			"id":   img.ID,
-			"tags": strings.Join(img.Tags, ", "),
-			"size": fmt.Sprintf("%d", img.Size),
+			"id":          img.ID,
+			"tags":        strings.Join(img.Tags, ", "),
+			"size":        fmt.Sprintf("%d", img.Size),
 			"repo_source": img.Label[ociSourceLabel],
 		}
 		if attrs["repo_source"] == "" {

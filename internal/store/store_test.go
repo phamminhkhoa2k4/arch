@@ -64,6 +64,37 @@ func TestOpenEnablesWAL(t *testing.T) {
 	}
 }
 
+// Bulk writers opt into synchronous=NORMAL: a scan is regenerable, so
+// skipping the per-commit fsync turns minutes into seconds on slow
+// disks. Plan state keeps the default FULL durability.
+func TestOpenBulkRelaxesSynchronous(t *testing.T) {
+	ctx := context.Background()
+	read := func(s *Store) int {
+		t.Helper()
+		var sync int
+		if err := s.DB().QueryRowContext(ctx, `PRAGMA synchronous`).Scan(&sync); err != nil {
+			t.Fatalf("synchronous: %v", err)
+		}
+		return sync
+	}
+	def, err := Open(ctx, filepath.Join(t.TempDir(), "default.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer func() { _ = def.Close() }()
+	if got := read(def); got != 2 {
+		t.Errorf("Open synchronous = %d, want 2 (FULL)", got)
+	}
+	bulk, err := OpenBulk(ctx, filepath.Join(t.TempDir(), "bulk.db"))
+	if err != nil {
+		t.Fatalf("open bulk: %v", err)
+	}
+	defer func() { _ = bulk.Close() }()
+	if got := read(bulk); got != 1 {
+		t.Errorf("OpenBulk synchronous = %d, want 1 (NORMAL)", got)
+	}
+}
+
 // Positive: a valid evidence row with polarity and raw_ref inserts.
 func TestEvidenceValidRowAccepted(t *testing.T) {
 	s := openTemp(t)

@@ -53,7 +53,7 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion, format strin
 	if err := validateFormat(format); err != nil {
 		return err
 	}
-	st, err := store.Open(ctx, dbPath)
+	st, err := store.OpenBulk(ctx, dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -194,11 +194,15 @@ func computeAndSaveVerdicts(ctx context.Context, st *store.Store, scanID int64) 
 	if err != nil {
 		return nil, err
 	}
+	inputs, err := st.BuildInputs(ctx, scanID)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	for _, ent := range ents {
-		in, err := st.BuildInput(ctx, scanID, ent.ID)
-		if err != nil {
-			return nil, fmt.Errorf("verdict input %s: %w", ent.IdentityKey, err)
+		in, ok := inputs[ent.ID]
+		if !ok {
+			return nil, fmt.Errorf("verdict input %s: missing entity input", ent.IdentityKey)
 		}
 		res := verdict.Compute(in, r, now)
 		if err := st.SaveVerdict(ctx, ent.ID, scanID, res, hash); err != nil {

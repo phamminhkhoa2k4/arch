@@ -5,7 +5,18 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
+
+// Prefetcher optionally warms read-only data before Collect runs.
+// Run drives prefetchers in the background, one at a time, while the
+// collect loop runs serially. External reads (journals, container APIs,
+// unit files) therefore overlap collection without competing with each
+// other, and every sink write stays ordered. Implementations must not
+// touch the sink and must store their own errors for Collect.
+type Prefetcher interface {
+	Prefetch(ctx context.Context)
+}
 
 // RunResult summarizes one collect pass.
 type RunResult struct {
@@ -40,6 +51,35 @@ func Versions(cs []Collector) string {
 // so one broken source never crashes the whole run.
 func Run(ctx context.Context, cs []Collector, sink Sink) (RunResult, error) {
 	var res RunResult
+	pctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	// Prefetchers run one at a time but overlap the collect loop: two
+	// heavy external scans (the systemd and cron journals both walk the
+	// same journal) compete for the same disk when started together,
+	// while serial prefetch lets each one use the full device during
+	// the collector that follows it.
+	go func() {
+		defer wg.Done()
+		for _, c := range cs {
+			p, ok := c.(Prefetcher)
+			if !ok {
+				continue
+			}
+			if pctx.Err() != nil {
+				return
+			}
+			p.Prefetch(pctx)
+		}
+	}()
+	// Prefetchers only read; once any Collect path is done (including
+	// a fatal error) cancel the rest and wait so no goroutine outlives
+	// the scan.
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
 	for _, c := range cs {
 		if err := ctx.Err(); err != nil {
 			return res, err
