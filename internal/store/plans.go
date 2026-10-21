@@ -110,7 +110,7 @@ func (s *Store) ConfirmPlanStage(ctx context.Context, planID int64, stage string
 	}
 	for i := 0; i < idx; i++ {
 		if states[i].Status != "done" {
-			return fmt.Errorf("stage %s not confirmed yet — %s must be completed first", states[i].Stage, stage)
+			return fmt.Errorf("cannot confirm %s: %s must be completed first", stage, states[i].Stage)
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339)

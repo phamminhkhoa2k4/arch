@@ -75,8 +75,8 @@ func TestConfirmPlanStageOrderAndPersist(t *testing.T) {
 	}
 
 	if err := st.ConfirmPlanStage(ctx, planID, "Observed"); err == nil ||
-		!strings.Contains(err.Error(), "Candidate") {
-		t.Fatalf("out-of-order confirm err = %v, want Candidate complaint", err)
+		err.Error() != "cannot confirm Observed: Candidate must be completed first" {
+		t.Fatalf("out-of-order confirm err = %v, want Candidate as the blocker", err)
 	}
 	if err := st.ConfirmPlanStage(ctx, planID, "Nope"); err == nil ||
 		!strings.Contains(err.Error(), "invalid stage") {
@@ -84,6 +84,10 @@ func TestConfirmPlanStageOrderAndPersist(t *testing.T) {
 	}
 	if err := st.ConfirmPlanStage(ctx, planID, "Candidate"); err != nil {
 		t.Fatalf("confirm candidate: %v", err)
+	}
+	if err := st.ConfirmPlanStage(ctx, planID, "Observed"); err == nil ||
+		err.Error() != "cannot confirm Observed: Quarantined must be completed first" {
+		t.Fatalf("second out-of-order confirm err = %v, want Quarantined as the blocker", err)
 	}
 	if err := st.ConfirmPlanStage(ctx, planID, "Quarantined"); err != nil {
 		t.Fatalf("confirm quarantined: %v", err)

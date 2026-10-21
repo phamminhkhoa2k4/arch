@@ -125,8 +125,8 @@ func TestPlanStatusAndConfirm(t *testing.T) {
 
 	buf.Reset()
 	err := runPlanRoot(t, db, &buf, "confirm", "lab-worker", "Observed", "--db", db)
-	if err == nil || !strings.Contains(err.Error(), "Candidate") {
-		t.Errorf("out-of-order confirm err = %v, want Candidate complaint", err)
+	if err == nil || err.Error() != "cannot confirm Observed: Candidate must be completed first" {
+		t.Errorf("out-of-order confirm err = %v, want Candidate as the blocker", err)
 	}
 
 	buf.Reset()
