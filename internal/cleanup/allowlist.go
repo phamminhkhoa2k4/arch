@@ -74,7 +74,7 @@ func validContainerName(name string) (bool, string) {
 		return false, ""
 	}
 	if strings.HasPrefix(name, "-") {
-		return false, fmt.Sprintf("the name starts with '-', which a command would read as an option")
+		return false, "the name starts with '-', which a command would read as an option"
 	}
 	if len(name) > 255 {
 		return false, fmt.Sprintf("the name is %d bytes, over the 255 byte limit", len(name))
