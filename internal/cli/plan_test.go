@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"archaeologist/internal/cleanup"
+	"archaeologist/internal/store"
 )
 
 // copyFixtureDB copies the committed lab fixture (plus any WAL files)
@@ -69,11 +72,11 @@ func TestPlanGenerateOrphaned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read plan dir: %v", err)
 	}
-	if len(entries) != 7 {
-		t.Errorf("plan files = %d, want 7", len(entries))
+	if len(entries) != 8 {
+		t.Errorf("plan files = %d, want 8", len(entries))
 	}
 	for _, want := range []string{
-		"plan.md", "01-candidate.sh", "02-quarantined.sh", "03-observed.sh",
+		"plan.md", "plan.json", "01-candidate.sh", "02-quarantined.sh", "03-observed.sh",
 		"04-archived.sh", "05-removed.sh", "06-verified.sh",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, want)); err != nil {
@@ -159,5 +162,182 @@ func TestPlanConfirmWithoutPlan(t *testing.T) {
 	err := runPlanRoot(t, db, &buf, "confirm", "lab-old-app", "Candidate", "--db", db)
 	if err == nil || !strings.Contains(err.Error(), "plan") {
 		t.Errorf("confirm without plan err = %v", err)
+	}
+}
+
+// The generated Verified script greps for cleanup.GoneSignal to tell
+// "the component is gone" (a pass) from "the command could not run"
+// (a failure), because both exit with the execution-error code. The
+// not-found error resolveComponent produces must keep carrying that
+// exact substring, or the script would report a successful removal
+// when the check actually failed.
+func TestGoneSignalMatchesResolveError(t *testing.T) {
+	db := copyFixtureDB(t)
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	scanID, err := st.LatestScanID(ctx)
+	if err != nil {
+		t.Fatalf("latest scan: %v", err)
+	}
+	_, err = resolveComponent(ctx, st, scanID, "definitely-not-a-real-component")
+	if err == nil {
+		t.Fatal("resolveComponent must fail for an unknown component")
+	}
+	if !strings.Contains(err.Error(), cleanup.GoneSignal) {
+		t.Errorf("resolveComponent error %q must contain cleanup.GoneSignal %q",
+			err.Error(), cleanup.GoneSignal)
+	}
+}
+
+// An untouched plan passes `plan check`.
+func TestPlanCheckPasses(t *testing.T) {
+	db := copyFixtureDB(t)
+	outDir := t.TempDir()
+	var buf strings.Builder
+	if err := runPlanRoot(t, db, &buf, "lab-worker",
+		"--db", db, "--out", outDir, "--rules-file", labRules()); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	buf.Reset()
+	err := runPlanRoot(t, db, &buf, "check", "lab-worker",
+		"--db", db, "--out", outDir, "--rules-file", labRules())
+	if err != nil {
+		t.Fatalf("check must pass on an untouched plan: %v\n%s", err, buf.String())
+	}
+	if !strings.Contains(buf.String(), "match the manifest") {
+		t.Errorf("check output missing the pass summary:\n%s", buf.String())
+	}
+}
+
+// Editing a stage script after generation makes `plan check` fail with
+// the attention exit code.
+func TestPlanCheckDetectsTamperedScript(t *testing.T) {
+	db := copyFixtureDB(t)
+	outDir := t.TempDir()
+	var buf strings.Builder
+	if err := runPlanRoot(t, db, &buf, "lab-worker",
+		"--db", db, "--out", outDir, "--rules-file", labRules()); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	path := filepath.Join(outDir, "container-lab-worker", "05-removed.sh")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	if err := os.WriteFile(path,
+		append(body, []byte("\nrm -rf /important\n")...), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	buf.Reset()
+	err = runPlanRoot(t, db, &buf, "check", "lab-worker",
+		"--db", db, "--out", outDir, "--rules-file", labRules())
+	if err == nil {
+		t.Fatal("check must fail after a script is tampered with")
+	}
+	if got := exitCodeOf(err); got != ExitAttention {
+		t.Errorf("exit code = %d, want %d", got, ExitAttention)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "NOT safe to run") || !strings.Contains(out, "05-removed.sh was modified") {
+		t.Errorf("check output missing the tamper diagnostic:\n%s", out)
+	}
+}
+
+// A plan generated under one rule set is refused by `plan check` when
+// the rules no longer match, even though every script hash is intact.
+func TestPlanCheckDetectsRulesChange(t *testing.T) {
+	db := copyFixtureDB(t)
+	outDir := t.TempDir()
+	var buf strings.Builder
+	if err := runPlanRoot(t, db, &buf, "lab-worker",
+		"--db", db, "--out", outDir, "--rules-file", labRules()); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	buf.Reset()
+	// Check with the embedded defaults instead of the lab override.
+	err := runPlanRoot(t, db, &buf, "check", "lab-worker",
+		"--db", db, "--out", outDir)
+	if err == nil {
+		t.Fatal("check must fail when the rules no longer match the manifest")
+	}
+	if !strings.Contains(buf.String(), "rules changed since generation") {
+		t.Errorf("check output missing the rules diagnostic:\n%s", buf.String())
+	}
+}
+
+// A component whose fingerprint changed since the plan was generated
+// is flagged so the operator reviews the plan before acting. It is a
+// warning rather than a hard failure: a rescan naturally refreshes some
+// attributes, and the script hashes still pin the plan itself.
+func TestPlanCheckWarnsOnFingerprintChange(t *testing.T) {
+	db := copyFixtureDB(t)
+	outDir := t.TempDir()
+	var buf strings.Builder
+	if err := runPlanRoot(t, db, &buf, "lab-worker",
+		"--db", db, "--out", outDir, "--rules-file", labRules()); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	// Rewrite the fingerprint recorded for the plan's component so the
+	// latest scan no longer matches the manifest.
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx,
+		`UPDATE entities SET fingerprint = 'changed-since-plan'
+		 WHERE identity_key = (SELECT identity_key FROM entities
+		                       WHERE scan_id = (SELECT max(id) FROM scans)
+		                         AND name = 'lab-worker')`); err != nil {
+		_ = st.Close()
+		t.Fatalf("update fingerprint: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	buf.Reset()
+	if err := runPlanRoot(t, db, &buf, "check", "lab-worker",
+		"--db", db, "--out", outDir, "--rules-file", labRules()); err != nil {
+		t.Fatalf("fingerprint drift must warn, not fail: %v\n%s", err, buf.String())
+	}
+	if !strings.Contains(buf.String(), "changed since the plan was generated") {
+		t.Errorf("check output missing the fingerprint warning:\n%s", buf.String())
+	}
+}
+
+// A plan directory that was never generated reports a clear problem
+// instead of a stack trace.
+func TestPlanCheckWithoutGeneratedPlan(t *testing.T) {
+	db := copyFixtureDB(t)
+	var buf strings.Builder
+	// Generate into one directory, then check against a different one
+	// that was never written to.
+	if err := runPlanRoot(t, db, &buf, "lab-worker",
+		"--db", db, "--out", t.TempDir(), "--rules-file", labRules()); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	buf.Reset()
+	err := runPlanRoot(t, db, &buf, "check", "lab-worker",
+		"--db", db, "--out", t.TempDir(), "--rules-file", labRules())
+	if err == nil {
+		t.Fatal("check must fail when no plan directory exists")
+	}
+	if !strings.Contains(buf.String(), cleanup.ManifestFile) {
+		t.Errorf("check output must name the missing manifest:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "NOT safe to run") {
+		t.Errorf("check output must mark the plan unsafe:\n%s", buf.String())
 	}
 }

@@ -5,12 +5,24 @@ import (
 	"strings"
 )
 
+// GoneSignal is the stable substring of the "component no longer
+// resolves" error the delete-check command reports. The generated
+// Verified script greps for it to tell "the component is gone" (a
+// pass) apart from "the command could not run" (a failure), because
+// both exit with the execution-error code. A test in the CLI package
+// keeps resolveComponent's wording in sync with this constant.
+const GoneSignal = "no component matches"
+
 // Build turns a cleanup-eligible component into the six-stage plan.
 // Every stage carries an action, a gate condition and the confirmer
 // who signs it off; the script body holds the exact commands plus a
 // "# rollback:" counterpart for each mutating step.
-func Build(c Component) Plan {
-	p := Plan{Component: c}
+//
+// rt pins the environment the scripts assume (database, rules, binary,
+// scan) so a plan generated against one database cannot silently
+// verify itself against another.
+func Build(c Component, rt Runtime) Plan {
+	p := Plan{Component: c, Runtime: rt}
 	p.VolumeWarnings = volumeWarnings(c)
 
 	ref := c.Ref
@@ -24,7 +36,7 @@ func Build(c Component) Plan {
 			Action:    fmt.Sprintf("Read this whole plan, run `archaeologist delete-check %s` and confirm the verdict is still orphan with no new blockers.", ref),
 			Gate:      "delete-check returns LIKELY_ORPHANED or ORPHANED with an empty blocker list.",
 			Confirmer: "Operator confirms after reading (plan confirm <component> Candidate).",
-			Script:    candidateScript(ref),
+			Script:    candidateScript(ref, rt),
 		},
 		{
 			Name:      "Quarantined",
@@ -38,7 +50,7 @@ func Build(c Component) Plan {
 			Action:    "Do nothing more — let the observe daemon watch for 14 days after quarantine.",
 			Gate:      "Observation window >= 14 days, no new activity, verdict still orphan.",
 			Confirmer: "Re-scan + delete-check (operator).",
-			Script:    observedScript(ref),
+			Script:    observedScript(ref, rt),
 		},
 		{
 			Name:      "Archived",
@@ -59,10 +71,50 @@ func Build(c Component) Plan {
 			Action:    "Run a fresh `archaeologist scan` and `delete-check` over the whole area: the component is gone and leaves no side effects (dead routes, broken cron, error logs).",
 			Gate:      "A fresh scan no longer contains the entity and no new related findings appear.",
 			Confirmer: "Operator + fresh scan results.",
-			Script:    verifiedScript(ref),
+			Script:    verifiedScript(ref, rt),
 		},
 	}
 	return p
+}
+
+// ShellQuote renders s as a single-quoted POSIX shell word. Every
+// host-derived value in a generated script — and every copy-paste hint
+// the CLI prints — goes through this helper, so a name or path cannot
+// break out of its quoting context or trigger expansion.
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// defaultStr returns s, or fallback when s is empty.
+func defaultStr(s, fallback string) string {
+	if strings.TrimSpace(s) == "" {
+		return fallback
+	}
+	return s
+}
+
+// scriptPreamble pins the tool and database paths a stage script
+// assumes. Both are editable at the top of the script, so an operator
+// who moved the binary or database fixes the script once instead of
+// hunting through every command.
+func scriptPreamble(rt Runtime) []string {
+	return []string{
+		"# Pinned at plan generation — edit here if you moved the binary or database.",
+		fmt.Sprintf("ARCHAEOLOGIST=%s", ShellQuote(defaultStr(rt.BinaryPath, "archaeologist"))),
+		fmt.Sprintf("DB=%s", ShellQuote(defaultStr(rt.DBPath, "archaeologist.db"))),
+	}
+}
+
+// deleteCheckCmd renders a delete-check invocation against the pinned
+// runtime. It emits --rules-file only when the plan was generated with
+// a rules override, so a plan built on the embedded defaults re-checks
+// with the same embedded defaults.
+func deleteCheckCmd(rt Runtime, ref string) string {
+	cmd := fmt.Sprintf("\"$ARCHAEOLOGIST\" delete-check %s --db \"$DB\"", ShellQuote(ref))
+	if rt.RulesPath != "" {
+		cmd += " --rules-file " + ShellQuote(rt.RulesPath)
+	}
+	return cmd
 }
 
 // volumeWarnings lists every container volume that must be backed up
@@ -85,28 +137,82 @@ func volumeWarnings(c Component) []string {
 	return out
 }
 
-func candidateScript(ref string) string {
-	return strings.Join([]string{
+func candidateScript(ref string, rt Runtime) string {
+	lines := []string{
 		"#!/usr/bin/env bash",
 		"set -euo pipefail",
 		"",
 		"# Candidate — verify the verdict is still safe to act on.",
-		fmt.Sprintf("archaeologist delete-check %q --db archaeologist.db", ref),
+		"",
+	}
+	lines = append(lines, scriptPreamble(rt)...)
+	lines = append(lines, "",
+		deleteCheckCmd(rt, ref),
 		"",
 		"# rollback: none needed (read-only step)",
-	}, "\n") + "\n"
+	)
+	return strings.Join(lines, "\n") + "\n"
 }
 
-func observedScript(ref string) string {
-	return strings.Join([]string{
+func observedScript(ref string, rt Runtime) string {
+	lines := []string{
 		"#!/usr/bin/env bash",
 		"set -euo pipefail",
 		"",
-		"# Observed — wait for the 14-day observation window; no commands.",
-		fmt.Sprintf("# After 14 days: archaeologist delete-check %q --db archaeologist.db", ref),
+		"# Observed — wait for the 14-day observation window; this stage runs nothing.",
+		"",
+	}
+	lines = append(lines, scriptPreamble(rt)...)
+	lines = append(lines, "",
+		fmt.Sprintf("# After 14 days: %s", deleteCheckCmd(rt, ref)),
 		"",
 		"# rollback: none needed (waiting step)",
-	}, "\n") + "\n"
+	)
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// verifiedScript re-scans and then distinguishes the three ways the
+// final check can end. It never swallows an execution error: an
+// unreadable database or a broken binary must fail the stage rather
+// than look like a successful removal.
+func verifiedScript(ref string, rt Runtime) string {
+	lines := []string{
+		"#!/usr/bin/env bash",
+		"set -euo pipefail",
+		"",
+		"# Verified — prove the component is gone and nothing else broke.",
+		"#",
+		"# delete-check exit contract:",
+		"#   0 or 1  the component still resolves  -> verification FAILED",
+		"#   2       \"" + GoneSignal + "\" -> the component is gone (PASS)",
+		"#   2       any other error              -> execution error (FAILED)",
+		"",
+	}
+	lines = append(lines, scriptPreamble(rt)...)
+	lines = append(lines, "",
+		"\"$ARCHAEOLOGIST\" scan --db \"$DB\"",
+		"",
+		"rc=0",
+		fmt.Sprintf("out=$(%s 2>&1) || rc=$?", deleteCheckCmd(rt, ref)),
+		"",
+		"if [ \"$rc\" -eq 0 ] || [ \"$rc\" -eq 1 ]; then",
+		"  printf '%s\\n' \"$out\" >&2",
+		"  echo \"FAILED: "+ref+" still resolves in a fresh scan — this stage is not done.\" >&2",
+		"  exit 1",
+		"fi",
+		"",
+		"if ! printf '%s\\n' \"$out\" | grep -q "+ShellQuote(GoneSignal)+"; then",
+		"  printf '%s\\n' \"$out\" >&2",
+		"  echo \"FAILED: delete-check could not run (exit $rc) — fix the error above and re-run.\" >&2",
+		"  exit 1",
+		"fi",
+		"",
+		"echo \"OK: the component no longer resolves in a fresh scan.\"",
+		"",
+		"# rollback: none — if delete-check still resolves the component,",
+		"# return to Removed and inspect the archive for a missed path.",
+	)
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func quarantineAction(c Component) string {
@@ -135,13 +241,13 @@ func quarantineScript(c Component) string {
 	switch c.Kind {
 	case "systemd_unit", "timer":
 		body = []string{
-			fmt.Sprintf("systemctl disable --now %s", c.Name),
-			fmt.Sprintf("# rollback: systemctl enable --now %s", c.Name),
+			fmt.Sprintf("systemctl disable --now %s", ShellQuote(c.Name)),
+			fmt.Sprintf("# rollback: systemctl enable --now %s", ShellQuote(c.Name)),
 		}
 	case "container":
 		body = []string{
-			fmt.Sprintf("docker stop %s", c.Name),
-			fmt.Sprintf("# rollback: docker start %s", c.Name),
+			fmt.Sprintf("docker stop %s", ShellQuote(c.Name)),
+			fmt.Sprintf("# rollback: docker start %s", ShellQuote(c.Name)),
 		}
 	case "cron_job":
 		f := attrOr(c.Attrs, "file", "")
@@ -152,8 +258,8 @@ func quarantineScript(c Component) string {
 			}
 		} else {
 			body = []string{
-				fmt.Sprintf("mv %q %q", f, f+".disabled"),
-				fmt.Sprintf("# rollback: mv %q %q", f+".disabled", f),
+				fmt.Sprintf("mv %s %s", ShellQuote(f), ShellQuote(f+".disabled")),
+				fmt.Sprintf("# rollback: mv %s %s", ShellQuote(f+".disabled"), ShellQuote(f)),
 			}
 		}
 	case "nginx_route":
@@ -195,19 +301,24 @@ func archiveScript(c Component, warnings []string) string {
 	var body []string
 	switch c.Kind {
 	case "systemd_unit", "timer":
+		// The archive filename concatenates a quoted directory with a
+		// quoted literal, so a unit name cannot trigger expansion inside
+		// the double-quoted path.
 		body = []string{
-			fmt.Sprintf("systemctl cat %s > \"$ARCHIVE/%s.txt\" 2>/dev/null || true", c.Name, c.Name),
-			fmt.Sprintf("systemctl show %s -p FragmentPath --value | xargs -r -I{} cp {} \"$ARCHIVE/\" 2>/dev/null || true", c.Name),
+			fmt.Sprintf("systemctl cat %s > \"$ARCHIVE/\"%s.txt 2>/dev/null || true",
+				ShellQuote(c.Name), ShellQuote(c.Name)),
+			fmt.Sprintf("systemctl show %s -p FragmentPath --value | xargs -r -I{} cp {} \"$ARCHIVE/\" 2>/dev/null || true", ShellQuote(c.Name)),
 		}
 	case "container":
 		body = []string{
-			fmt.Sprintf("docker inspect %s > \"$ARCHIVE/inspect-%s.json\"", c.Name, c.Name),
-			fmt.Sprintf("docker inspect %s --format '{{.Config.Image}}' > \"$ARCHIVE/image-%s.txt\" 2>/dev/null || true", c.Name, c.Name),
+			fmt.Sprintf("docker inspect %s > \"$ARCHIVE/\"%s.json", ShellQuote(c.Name), ShellQuote("inspect-"+c.Name)),
+			fmt.Sprintf("docker inspect %s --format '{{.Config.Image}}' > \"$ARCHIVE/\"%s 2>/dev/null || true",
+				ShellQuote(c.Name), ShellQuote("image-"+c.Name+".txt")),
 		}
 	case "cron_job":
 		f := attrOr(c.Attrs, "file", "")
 		if f != "" {
-			body = []string{fmt.Sprintf("cp %q \"$ARCHIVE/\"", f)}
+			body = []string{fmt.Sprintf("cp %s \"$ARCHIVE/\"", ShellQuote(f))}
 		} else {
 			body = []string{"crontab -l > \"$ARCHIVE/crontab.bak\" 2>/dev/null || true"}
 		}
@@ -233,7 +344,10 @@ func removedAction(c Component) string {
 	case "container":
 		return "Remove the three targets separately: container -> image -> volume (each command has its own rollback; delete a volume only after confirming the backup)."
 	case "systemd_unit", "timer":
-		return "Delete the unit file + daemon-reload (only after archiving)."
+		if isLocalUnitPath(attrOr(c.Attrs, "fragment_path", "")) {
+			return "Delete the unit file + daemon-reload (only after archiving)."
+		}
+		return "Disable the unit, then remove it through its package manager — the unit file is not locally managed."
 	case "cron_job":
 		return "Delete the disabled cron file (only after archiving)."
 	case "nginx_route":
@@ -241,6 +355,14 @@ func removedAction(c Component) string {
 	default:
 		return fmt.Sprintf("Remove %s using its kind's mechanism — see the script.", c.Kind)
 	}
+}
+
+// isLocalUnitPath reports whether a systemd fragment path is a unit the
+// operator manages by hand. Units shipped by a package live under
+// /usr/lib or /lib; deleting those by hand desynchronises the package
+// database, so the plan must route them through the package manager.
+func isLocalUnitPath(path string) bool {
+	return strings.HasPrefix(path, "/etc/systemd/system/")
 }
 
 func removedScript(c Component) string {
@@ -254,18 +376,29 @@ func removedScript(c Component) string {
 	switch c.Kind {
 	case "container":
 		img := attrOr(c.Attrs, "image", "")
+		imgID := attrOr(c.Attrs, "image_id", "")
 		vols := volumeWarnings(c)
 		body = []string{
-			fmt.Sprintf("docker rm %s", c.Name),
+			fmt.Sprintf("docker rm %s", ShellQuote(c.Name)),
 			"# rollback: no direct command — rebuild from the archived compose/inspect",
 			"",
 			"# --- image (separate — DO NOT merge with the container step) ---",
 		}
-		if img != "" {
+		switch {
+		case imgID != "":
+			// The image ID is a digest-derived immutable reference, so
+			// removing it cannot hit a different image that later reused
+			// the same tag.
 			body = append(body,
-				fmt.Sprintf("docker rmi %s", img),
-				fmt.Sprintf("# rollback: docker pull %s", img))
-		} else {
+				fmt.Sprintf("docker rmi %s", ShellQuote(imgID)),
+				"# rollback: docker pull <tag> — the image ID is immutable, so this only",
+				"#           restores the same bytes if the registry still serves them.")
+		case img != "":
+			body = append(body,
+				fmt.Sprintf("# image ID unknown; removing by tag %s may hit a re-pulled image.", ShellQuote(img)),
+				fmt.Sprintf("docker rmi %s", ShellQuote(img)),
+				fmt.Sprintf("# rollback: docker pull %s", ShellQuote(img)))
+		default:
 			body = append(body, "# image unknown — read archive/image-*.txt and rmi by hand")
 		}
 		body = append(body, "", "# --- volume (separate; only after your manual backup) ---")
@@ -275,15 +408,29 @@ func removedScript(c Component) string {
 		for _, v := range vols {
 			body = append(body,
 				fmt.Sprintf("# Volume %s may still hold data — confirm your backup before uncommenting the next line:", v),
-				fmt.Sprintf("# docker volume rm %s", volumeName(v)),
+				fmt.Sprintf("# docker volume rm %s", ShellQuote(volumeName(v))),
 				"# rollback: none — restore from the backup you confirmed at Archived")
 		}
 	case "systemd_unit", "timer":
+		frag := attrOr(c.Attrs, "fragment_path", "")
 		body = []string{
-			fmt.Sprintf("systemctl disable --now %s 2>/dev/null || true", c.Name),
-			fmt.Sprintf("rm -f /etc/systemd/system/%s /lib/systemd/system/%s 2>/dev/null || true", c.Name, c.Name),
-			"systemctl daemon-reload",
-			fmt.Sprintf("# rollback: copy %s.txt from archive/ back to /etc/systemd/system/ then daemon-reload + enable --now", c.Name),
+			fmt.Sprintf("systemctl disable --now %s 2>/dev/null || true", ShellQuote(c.Name)),
+		}
+		if isLocalUnitPath(frag) {
+			body = append(body,
+				fmt.Sprintf("rm -f %s", ShellQuote(frag)),
+				"systemctl daemon-reload",
+				fmt.Sprintf("# rollback: copy %s.txt from archive/ back to /etc/systemd/system/ then daemon-reload + enable --now", c.Name),
+			)
+		} else {
+			body = append(body,
+				"# The unit file is NOT under /etc/systemd/system, so a package owns it.",
+				"# Deleting it by hand desynchronises the package database — use the package manager:",
+				"#   apt-get remove <package>       # Debian/Ubuntu",
+				"#   dnf remove <package>           # Fedora/RHEL",
+				"#   pacman -Rns <package>          # Arch",
+				"# rollback: reinstall the package to restore the unit file, then enable --now",
+			)
 		}
 	case "cron_job":
 		f := attrOr(c.Attrs, "file", "")
@@ -292,8 +439,8 @@ func removedScript(c Component) string {
 				"# rollback: restore from archive/crontab.bak"}
 		} else {
 			body = []string{
-				fmt.Sprintf("rm -f %q %q 2>/dev/null || true", f, f+".disabled"),
-				fmt.Sprintf("# rollback: cp %q back from archive/ then re-verify", f),
+				fmt.Sprintf("rm -f %s %s 2>/dev/null || true", ShellQuote(f), ShellQuote(f+".disabled")),
+				fmt.Sprintf("# rollback: cp %s back from archive/ then re-verify", ShellQuote(f)),
 			}
 		}
 	case "nginx_route":
@@ -306,20 +453,6 @@ func removedScript(c Component) string {
 		body = []string{fmt.Sprintf("# no standard removal command for kind %q", c.Kind)}
 	}
 	return strings.Join(append(head, append(body, "", "# end removal")...), "\n") + "\n"
-}
-
-func verifiedScript(ref string) string {
-	return strings.Join([]string{
-		"#!/usr/bin/env bash",
-		"set -euo pipefail",
-		"",
-		"# Verified — prove the component is gone and nothing else broke.",
-		"archaeologist scan --db archaeologist.db",
-		fmt.Sprintf("archaeologist delete-check %q --db archaeologist.db || true", ref),
-		"",
-		"# rollback: none — if delete-check still resolves the component,",
-		"# return to Removed and inspect the archive for a missed path.",
-	}, "\n") + "\n"
 }
 
 // attrOr returns attrs[key] or fallback.
