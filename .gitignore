@@ -28,5 +28,7 @@ bench-results/
 
 docs/
 *.md
+# The root README is the public entrypoint; keep local notes ignored.
+!README.md
 # Golden fixture for the CI benchmark
 !lab/fixtures/scan.db
