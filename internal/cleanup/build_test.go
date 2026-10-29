@@ -230,10 +230,14 @@ func TestShellQuoteEscapesSingleQuote(t *testing.T) {
 	}
 }
 
-// The archive redirect must not place a host-derived name inside a
-// double-quoted path, where a `$` or backtick would be expanded by the
-// shell. It must concatenate a quoted directory with a quoted literal.
+// A host-derived name must never reach the destination path of an
+// archive redirect. A name outside the allowlist falls back to a
+// stage-named file entirely, so the shell never sees it in the
+// destination; a name inside the allowlist is still quoted separately
+// from the directory so a quote cannot break its context.
 func TestArchiveFilenamesAreNotExpanded(t *testing.T) {
+	// A name containing shell metacharacters is outside the systemd
+	// unit name alphabet, so it must not reach the destination at all.
 	c := systemdComp()
 	c.Name = "weird$(id).service"
 	c.Attrs = map[string]string{"fragment_path": "/etc/systemd/system/weird$(id).service"}
@@ -242,8 +246,19 @@ func TestArchiveFilenamesAreNotExpanded(t *testing.T) {
 	if strings.Contains(arch.Script, `"$ARCHIVE/weird$(id).service.txt"`) {
 		t.Errorf("archive filename places a host value in an expandable context:\n%s", arch.Script)
 	}
-	if !strings.Contains(arch.Script, `"$ARCHIVE/"'weird$(id).service'.txt`) {
-		t.Errorf("archive filename must quote the literal separately from the directory:\n%s", arch.Script)
+	if strings.Contains(arch.Script, `'weird$(id).service'.txt`) {
+		t.Errorf("archive filename must not carry a name outside the allowlist:\n%s", arch.Script)
+	}
+	if !strings.Contains(arch.Script, `"$ARCHIVE/"'unit'.txt`) {
+		t.Errorf("archive filename must fall back to a stage-named file:\n%s", arch.Script)
+	}
+
+	// A name inside the allowlist still gets its own quoted literal,
+	// separate from the quoted directory.
+	ok := systemdComp()
+	okArch := stageByName(t, Build(ok, testRuntime()), "Archived")
+	if !strings.Contains(okArch.Script, `"$ARCHIVE/"'lab-legacy.service'.txt`) {
+		t.Errorf("archive filename must quote the literal separately from the directory:\n%s", okArch.Script)
 	}
 }
 

@@ -237,6 +237,10 @@ func quarantineScript(c Component) string {
 		"",
 		"# Quarantined — stop the component without deleting anything.",
 	}
+	if ok, reason := nameCheck(c); !ok {
+		body := skipLines(c.Kind, c.Name, reason)
+		return strings.Join(append(head, append(body, "", "# end quarantine")...), "\n") + "\n"
+	}
 	var body []string
 	switch c.Kind {
 	case "systemd_unit", "timer":
@@ -303,24 +307,43 @@ func archiveScript(c Component, warnings []string) string {
 	case "systemd_unit", "timer":
 		// The archive filename concatenates a quoted directory with a
 		// quoted literal, so a unit name cannot trigger expansion inside
-		// the double-quoted path.
+		// the double-quoted path. When the name is outside the allowlist
+		// the file is still archived, just under a stage-named file, so a
+		// hostile name never reaches the destination path.
+		dest := c.Name
+		if ok, _ := validUnitName(c.Name); !ok {
+			dest = "unit"
+		}
 		body = []string{
 			fmt.Sprintf("systemctl cat %s > \"$ARCHIVE/\"%s.txt 2>/dev/null || true",
-				ShellQuote(c.Name), ShellQuote(c.Name)),
+				ShellQuote(c.Name), ShellQuote(dest)),
 			fmt.Sprintf("systemctl show %s -p FragmentPath --value | xargs -r -I{} cp {} \"$ARCHIVE/\" 2>/dev/null || true", ShellQuote(c.Name)),
 		}
 	case "container":
+		dest := c.Name
+		if ok, _ := validContainerName(c.Name); !ok {
+			dest = "container"
+		}
 		body = []string{
-			fmt.Sprintf("docker inspect %s > \"$ARCHIVE/\"%s.json", ShellQuote(c.Name), ShellQuote("inspect-"+c.Name)),
+			fmt.Sprintf("docker inspect %s > \"$ARCHIVE/\"%s.json", ShellQuote(c.Name), ShellQuote("inspect-"+dest)),
 			fmt.Sprintf("docker inspect %s --format '{{.Config.Image}}' > \"$ARCHIVE/\"%s 2>/dev/null || true",
-				ShellQuote(c.Name), ShellQuote("image-"+c.Name+".txt")),
+				ShellQuote(c.Name), ShellQuote("image-"+dest+".txt")),
 		}
 	case "cron_job":
 		f := attrOr(c.Attrs, "file", "")
-		if f != "" {
-			body = []string{fmt.Sprintf("cp %s \"$ARCHIVE/\"", ShellQuote(f))}
-		} else {
+		if f == "" {
 			body = []string{"crontab -l > \"$ARCHIVE/crontab.bak\" 2>/dev/null || true"}
+		} else if ok, reason := validCronPath(f); !ok {
+			body = []string{
+				fmt.Sprintf("# SKIPPED: the cron file path %q is outside the allowed path set.", f),
+				fmt.Sprintf("#   Reason: %s", reason),
+				"# No copy command is generated. Back the file up by hand before the",
+				"# Removed stage — a path that cannot be named safely cannot be archived",
+				"# safely either.",
+				"# rollback: n/a — this step emits no command",
+			}
+		} else {
+			body = []string{fmt.Sprintf("cp %s \"$ARCHIVE/\"", ShellQuote(f))}
 		}
 	case "nginx_route":
 		body = []string{
@@ -365,12 +388,42 @@ func isLocalUnitPath(path string) bool {
 	return strings.HasPrefix(path, "/etc/systemd/system/")
 }
 
+// packageManagerLines renders the guidance for a unit whose file a
+// package owns. Deleting it by hand desynchronises the package
+// database, so no delete command is emitted at all.
+func packageManagerLines() []string {
+	return []string{
+		"# The unit file is NOT under /etc/systemd/system, so a package owns it.",
+		"# Deleting it by hand desynchronises the package database — use the package manager:",
+		"#   apt-get remove <package>       # Debian/Ubuntu",
+		"#   dnf remove <package>           # Fedora/RHEL",
+		"#   pacman -Rns <package>          # Arch",
+		"# rollback: reinstall the package to restore the unit file, then enable --now",
+	}
+}
+
+// noFragmentPathLines renders the guidance for a unit with no recorded
+// fragment path. Nothing is safe to name, so the operator is pointed at
+// the live system instead of being handed a guessed path.
+func noFragmentPathLines() []string {
+	return []string{
+		"# No fragment path was recorded for this unit, so there is no file this",
+		"# stage may name. Read the real path from the archived unit text, or from",
+		"# `systemctl show <unit> -p FragmentPath`, then decide by hand.",
+		"# rollback: n/a — this step emits no command",
+	}
+}
+
 func removedScript(c Component) string {
 	head := []string{
 		"#!/usr/bin/env bash",
 		"set -euo pipefail",
 		"",
 		"# Removed — delete for real. Archive MUST exist before this stage.",
+	}
+	if ok, reason := nameCheck(c); !ok {
+		body := skipLines(c.Kind, c.Name, reason)
+		return strings.Join(append(head, append(body, "", "# end removal")...), "\n") + "\n"
 	}
 	var body []string
 	switch c.Kind {
@@ -416,21 +469,28 @@ func removedScript(c Component) string {
 		body = []string{
 			fmt.Sprintf("systemctl disable --now %s 2>/dev/null || true", ShellQuote(c.Name)),
 		}
-		if isLocalUnitPath(frag) {
+		switch ok, reason := safePath(frag); {
+		case frag == "":
+			// No fragment path recorded: nothing to delete, so fall
+			// through to the package-manager guidance rather than
+			// inventing a path.
+			body = append(body, noFragmentPathLines()...)
+		case !ok:
+			body = append(body,
+				fmt.Sprintf("# SKIPPED: the fragment path %q is outside the allowed path set.", frag),
+				fmt.Sprintf("#   Reason: %s", reason),
+				"# No delete command is generated, so nothing in it can name the wrong",
+				"# file. Move or delete the unit file by hand, then run daemon-reload.",
+				"# rollback: n/a — this step emits no command",
+			)
+		case isLocalUnitPath(frag):
 			body = append(body,
 				fmt.Sprintf("rm -f %s", ShellQuote(frag)),
 				"systemctl daemon-reload",
 				fmt.Sprintf("# rollback: copy %s.txt from archive/ back to /etc/systemd/system/ then daemon-reload + enable --now", c.Name),
 			)
-		} else {
-			body = append(body,
-				"# The unit file is NOT under /etc/systemd/system, so a package owns it.",
-				"# Deleting it by hand desynchronises the package database — use the package manager:",
-				"#   apt-get remove <package>       # Debian/Ubuntu",
-				"#   dnf remove <package>           # Fedora/RHEL",
-				"#   pacman -Rns <package>          # Arch",
-				"# rollback: reinstall the package to restore the unit file, then enable --now",
-			)
+		default:
+			body = append(body, packageManagerLines()...)
 		}
 	case "cron_job":
 		f := attrOr(c.Attrs, "file", "")
