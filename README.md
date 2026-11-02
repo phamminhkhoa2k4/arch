@@ -105,6 +105,11 @@ writes only its own database and output files:
 sudo ./archaeologist scan --db scan.db
 ```
 
+While the collectors run, `scan` reports progress on stderr: an animated
+spinner line on a terminal, or plain `scan: collecting <name> (i/n)` lines
+when the output is redirected. stdout carries only the result, so
+`--format json` output stays parseable.
+
 Ask the central question for one component:
 
 ```sh

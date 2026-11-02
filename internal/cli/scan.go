@@ -40,7 +40,7 @@ func newScanCmd() *cobra.Command {
 		Short: "Scan the host and print an infrastructure summary",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			format, _ := cmd.Flags().GetString("format")
-			return runScan(cmd.Context(), cmd.OutOrStdout(), dbPath, Version, format)
+			return runScan(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), dbPath, Version, format)
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
@@ -49,7 +49,10 @@ func newScanCmd() *cobra.Command {
 	return cmd
 }
 
-func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion, format string) error {
+// runScan drives the pipeline. Progress goes to errW (stderr) so the
+// result on w (stdout) stays the only thing pipes and JSON consumers
+// see.
+func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format string) error {
 	if err := validateFormat(format); err != nil {
 		return err
 	}
@@ -132,6 +135,15 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion, format strin
 
 	sink := store.NewScanSink(ctx, st, scanID)
 	cs = newCollectors(sink)
+
+	// Announce progress while the collectors run so a scan never looks
+	// frozen; stop clears the line before any result is printed.
+	prog := newScanProgress(errW, len(cs), progressModeFor(errW, format))
+	defer prog.stop()
+	for i, c := range cs {
+		cs[i] = progressCollector{inner: c, prog: prog}
+	}
+
 	res, err := collector.Run(ctx, cs, sink)
 	if err != nil {
 		_ = st.FinishScan(ctx, scanID, "failed")
@@ -149,10 +161,13 @@ func runScan(ctx context.Context, w io.Writer, dbPath, toolVersion, format strin
 	if err != nil {
 		return err
 	}
+	prog.phase("computing verdicts")
 	rollup, err := computeAndSaveVerdicts(ctx, st, scanID)
 	if err != nil {
 		return err
 	}
+	// Clear the progress line before any result reaches stdout.
+	prog.stop()
 	if format == formatJSON {
 		return writeJSON(w, scanJSON{
 			ScanID:           scanID,
