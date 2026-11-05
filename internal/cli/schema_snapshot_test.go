@@ -139,6 +139,22 @@ func TestSchemaConformance_ObserveStatus(t *testing.T) {
 	}
 }
 
+func TestSchemaConformance_Components(t *testing.T) {
+	db := copyFixtureDB(t)
+	doc := decodeCLI(t, "components", "--db", db, "--format", "json")
+	if err := loadSchema(t, "components.schema.json").Validate(doc); err != nil {
+		t.Errorf("components output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+}
+
+func TestSchemaConformance_DeleteCheckAll(t *testing.T) {
+	db := copyFixtureDB(t)
+	doc := decodeCLI(t, "delete-check", "--all", "--db", db, "--format", "json")
+	if err := loadSchema(t, "delete-check-all.schema.json").Validate(doc); err != nil {
+		t.Errorf("delete-check --all output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+}
+
 func TestSchemaConformance_Impact(t *testing.T) {
 	db := copyFixtureDB(t)
 	doc := decodeCLI(t, "impact", "lab-worker", "--db", db, "--format", "json")
@@ -245,5 +261,27 @@ func TestSchemaConformance_RemediationNegativeProof(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "inbound") {
 		t.Errorf("expected error to mention 'inbound'; got: %v", err)
+	}
+
+	comps := decodeCLI(t, "components", "--db", db, "--format", "json")
+	delete(comps, "components")
+	err = loadSchema(t, "components.schema.json").Validate(comps)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping required 'components'\ndoc:\n%s",
+			marshalDoc(t, comps))
+	}
+	if !strings.Contains(err.Error(), "components") {
+		t.Errorf("expected error to mention 'components'; got: %v", err)
+	}
+
+	batch := decodeCLI(t, "delete-check", "--all", "--db", db, "--format", "json")
+	delete(batch, "summary")
+	err = loadSchema(t, "delete-check-all.schema.json").Validate(batch)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping required 'summary'\ndoc:\n%s",
+			marshalDoc(t, batch))
+	}
+	if !strings.Contains(err.Error(), "summary") {
+		t.Errorf("expected error to mention 'summary'; got: %v", err)
 	}
 }

@@ -221,6 +221,29 @@ broken-route risk in the component's neighbourhood, and the blind spots
 affecting the conclusion. It accepts `--format json` (contract:
 [`impact.schema.json`](schema/impact.schema.json)).
 
+## Component search and batch check
+
+List every component recorded in the latest scan without knowing an identity
+key, and filter by kind or stored verdict state:
+
+```sh
+./archaeologist components --db scan.db
+./archaeologist components --db scan.db --kind nginx_route --state UNKNOWN
+```
+
+Run the verdict for every component at once, with an aggregate exit code
+(0 clean, 1 attention needed, 2 execution error) and a per-component summary:
+
+```sh
+./archaeologist delete-check --all --db scan.db
+./archaeologist delete-check --all --db scan.db --kind nginx_route --format json
+```
+
+Both accept `--format json` (contracts:
+[`components.schema.json`](schema/components.schema.json),
+[`delete-check-all.schema.json`](schema/delete-check-all.schema.json)) and cap
+only their text view with `--limit`.
+
 ## Observation mode
 
 A single scan is a snapshot. To distinguish “not running right now” from “not
@@ -345,7 +368,8 @@ authentication; do not expose it to an untrusted network.
 ## JSON output and schemas
 
 Machine-readable output is available from `scan`, `scan list`, `scan diff`,
-`observe status`, `impact`, `delete-check`, `explain`, and `report`:
+`observe status`, `impact`, `components`, `delete-check`, `explain`, and
+`report`:
 
 ```sh
 ./archaeologist scan --format json --db scan.db
@@ -360,7 +384,9 @@ The published contracts live in [`schema/`](schema/):
 - [`scan-diff.schema.json`](schema/scan-diff.schema.json)
 - [`observe-status.schema.json`](schema/observe-status.schema.json)
 - [`impact.schema.json`](schema/impact.schema.json)
+- [`components.schema.json`](schema/components.schema.json)
 - [`delete-check.schema.json`](schema/delete-check.schema.json)
+- [`delete-check-all.schema.json`](schema/delete-check-all.schema.json)
 - [`explain.schema.json`](schema/explain.schema.json)
 - [`report.schema.json`](schema/report.schema.json)
 

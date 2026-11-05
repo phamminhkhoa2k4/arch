@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist components --format json",
+  "type": "object",
+  "required": ["scan_id", "components"],
+  "properties": {
+    "scan_id": { "type": "integer", "minimum": 1 },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "name", "identity", "verdict_state", "coverage"],
+        "properties": {
+          "kind": { "type": "string" },
+          "name": { "type": "string" },
+          "identity": { "type": "string" },
+          "verdict_state": {
+            "type": "string",
+            "enum": ["ACTIVE", "LIKELY_ORPHANED", "ORPHANED", "UNKNOWN"],
+            "description": "UNKNOWN when no verdict was stored for the component"
+          },
+          "coverage": {
+            "type": "string",
+            "enum": ["HIGH", "MEDIUM", "LOW", ""],
+            "description": "empty when no verdict was stored for the component"
+          }
+        }
+      }
+    }
+  }
+}

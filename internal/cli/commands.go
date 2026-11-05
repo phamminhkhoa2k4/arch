@@ -11,6 +11,7 @@ func addCommands(root *cobra.Command) {
 		newExplainCmd(),
 		newDeleteCheckCmd(),
 		newImpactCmd(),
+		newComponentsCmd(),
 		newPlanCmd(),
 		newReportCmd(),
 		newServeCmd(),

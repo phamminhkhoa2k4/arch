@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist delete-check --all --format json",
+  "type": "object",
+  "required": ["scan_id", "summary", "results"],
+  "properties": {
+    "scan_id": { "type": "integer", "minimum": 1 },
+    "summary": {
+      "type": "object",
+      "required": ["total", "attention", "errors", "exit_code"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "attention": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "exit_code": {
+          "type": "integer",
+          "enum": [0, 1, 2],
+          "description": "0 clean, 1 attention needed, 2 execution error"
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "name", "identity", "state", "coverage", "blockers", "exit_code"],
+        "properties": {
+          "kind": { "type": "string" },
+          "name": { "type": "string" },
+          "identity": { "type": "string" },
+          "state": {
+            "type": "string",
+            "enum": ["ACTIVE", "LIKELY_ORPHANED", "ORPHANED", "UNKNOWN"]
+          },
+          "coverage": {
+            "type": "string",
+            "enum": ["HIGH", "MEDIUM", "LOW", ""]
+          },
+          "blockers": { "type": "integer", "minimum": 0 },
+          "exit_code": {
+            "type": "integer",
+            "enum": [0, 1, 2]
+          },
+          "error": {
+            "type": "string",
+            "description": "present only when the component failed to check"
+          }
+        }
+      }
+    }
+  }
+}
