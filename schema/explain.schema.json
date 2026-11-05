@@ -54,6 +54,46 @@
           "detail": { "type": "object" }
         }
       }
+    },
+    "next": { "$ref": "#/definitions/next" }
+  },
+  "definitions": {
+    "next": {
+      "type": "object",
+      "description": "present only when explain runs with --next",
+      "required": ["window", "blind_spots"],
+      "properties": {
+        "window": {
+          "type": "object",
+          "required": ["ready", "required_days", "days_remaining", "ready_at", "advice"],
+          "properties": {
+            "ready": { "type": "boolean" },
+            "required_days": { "type": "integer", "minimum": 0 },
+            "days_remaining": { "type": "integer", "minimum": 0 },
+            "ready_at": {
+              "type": ["string", "null"],
+              "description": "earliest date the window can qualify (window start + required days)"
+            },
+            "advice": { "type": "string" }
+          }
+        },
+        "blind_spots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["channel", "reason", "category", "advice"],
+            "properties": {
+              "channel": { "type": "string" },
+              "reason": { "type": "string" },
+              "category": {
+                "type": "string",
+                "enum": ["permission", "resolve", "limitation", "manual"]
+              },
+              "advice": { "type": "string" }
+            }
+          }
+        }
+      }
     }
   }
 }

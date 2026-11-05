@@ -163,7 +163,14 @@ A blocker always wins over a “looks unused” signal. Examples include:
 - a cron job or timer still referencing it;
 - a running process or container using it.
 
-Run `explain` to see the exact blocker text and the evidence behind it.
+Run `explain` to see the exact blocker text and the evidence behind it. Add
+`--next` for the remediation view: how many observation days are still missing
+and, per blind spot, the concrete action that clears it — grant a group, supply
+a missing value, resolve an nginx variable, observe longer, or inspect by hand:
+
+```sh
+./archaeologist explain --db scan.db --next nginx.service
+```
 
 ### Exit codes
 
@@ -229,6 +236,17 @@ sudo ./archaeologist observe uninstall-service
 
 Observation is especially important for monthly jobs, timers, and low-traffic
 services. The default window is 14 days.
+
+Check progress at any time — daemon state, window, and sample coverage:
+
+```sh
+./archaeologist observe status --db scan.db
+```
+
+The window line reports how many days are still missing and the earliest date
+the window can qualify, so you know when verdicts will have enough data behind
+them. An inactive daemon includes the command to start it; `--format json`
+exposes the same facts for automation.
 
 ## Cleanup plans
 
@@ -312,7 +330,7 @@ authentication; do not expose it to an untrusted network.
 ## JSON output and schemas
 
 Machine-readable output is available from `scan`, `scan list`, `scan diff`,
-`delete-check`, `explain`, and `report`:
+`observe status`, `delete-check`, `explain`, and `report`:
 
 ```sh
 ./archaeologist scan --format json --db scan.db
@@ -325,6 +343,7 @@ The published contracts live in [`schema/`](schema/):
 - [`scan.schema.json`](schema/scan.schema.json)
 - [`scan-list.schema.json`](schema/scan-list.schema.json)
 - [`scan-diff.schema.json`](schema/scan-diff.schema.json)
+- [`observe-status.schema.json`](schema/observe-status.schema.json)
 - [`delete-check.schema.json`](schema/delete-check.schema.json)
 - [`explain.schema.json`](schema/explain.schema.json)
 - [`report.schema.json`](schema/report.schema.json)

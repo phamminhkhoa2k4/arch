@@ -47,7 +47,7 @@ func newObserveCmd() *cobra.Command {
 		"how often to sample the socket tables")
 	cmd.Flags().BoolVar(&daemon, "daemon", false,
 		"quiet long-running mode (backgrounding is done by systemd or nohup)")
-	cmd.AddCommand(newObserveInstallCmd(), newObserveUninstallCmd())
+	cmd.AddCommand(newObserveStatusCmd(), newObserveInstallCmd(), newObserveUninstallCmd())
 	return cmd
 }
 

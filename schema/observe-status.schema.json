@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist observe status --format json",
+  "type": "object",
+  "required": [
+    "daemon", "daemon_detail", "unit", "scan_id", "window",
+    "required_days", "window_ready", "days_remaining", "ready_at",
+    "observations"
+  ],
+  "properties": {
+    "daemon": {
+      "type": "string",
+      "enum": ["active", "inactive", "unknown"],
+      "description": "unknown when systemd itself is unreachable; see daemon_detail"
+    },
+    "daemon_detail": {
+      "type": "string",
+      "description": "why the daemon state is unknown; empty when the state is known"
+    },
+    "unit": { "type": "string" },
+    "scan_id": { "type": "integer", "minimum": 1 },
+    "window": {
+      "type": "object",
+      "required": ["start", "end", "days", "source"],
+      "properties": {
+        "start": { "type": "string" },
+        "end": { "type": "string" },
+        "days": { "type": "integer", "minimum": 0 },
+        "source": {
+          "type": "string",
+          "enum": ["observations", "first_seen"]
+        }
+      }
+    },
+    "required_days": { "type": "integer", "minimum": 0 },
+    "window_ready": { "type": "boolean" },
+    "days_remaining": { "type": "integer", "minimum": 0 },
+    "ready_at": {
+      "type": ["string", "null"],
+      "description": "earliest date the window can qualify (window start + required days); null when the start stamp is unparsable"
+    },
+    "observations": {
+      "type": "object",
+      "required": ["first", "latest", "buckets"],
+      "properties": {
+        "first": {
+          "type": ["string", "null"],
+          "description": "earliest sampled hour bucket; null when nothing was sampled yet"
+        },
+        "latest": {
+          "type": ["string", "null"],
+          "description": "most recent sample hit; null when nothing was sampled yet"
+        },
+        "buckets": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

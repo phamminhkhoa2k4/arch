@@ -66,3 +66,29 @@ func (s *Store) PruneObservations(ctx context.Context, before string) (int64, er
 	}
 	return n, nil
 }
+
+// ObservationStats summarizes the observation table for the status
+// view. Times are empty while no sample has ever been recorded.
+type ObservationStats struct {
+	FirstBucket string // earliest sampled hour bucket
+	LatestSeen  string // most recent sample hit
+	Buckets     int    // distinct hour buckets
+}
+
+// ObservationStats reads the whole-table summary in one pass.
+func (s *Store) ObservationStats(ctx context.Context) (ObservationStats, error) {
+	var st ObservationStats
+	var first, latest any
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT MIN(bucket_start), MAX(last_seen_at), COUNT(DISTINCT bucket_start)
+		 FROM observations`).Scan(&first, &latest, &st.Buckets); err != nil {
+		return ObservationStats{}, fmt.Errorf("observation stats: %w", err)
+	}
+	if v, ok := first.(string); ok {
+		st.FirstBucket = v
+	}
+	if v, ok := latest.(string); ok {
+		st.LatestSeen = v
+	}
+	return st, nil
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"archaeologist/internal/llm"
+	"archaeologist/internal/rules"
 	"archaeologist/internal/store"
 )
 
@@ -18,7 +19,9 @@ import (
 // blind spots from the latest scan.
 func newExplainCmd() *cobra.Command {
 	var dbPath string
+	var rulesPath string
 	var explain bool
+	var next bool
 	cmd := &cobra.Command{
 		Use:   "explain <component>",
 		Short: "Show dependencies, evidence, and blind spots for a component",
@@ -26,18 +29,22 @@ func newExplainCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			format, _ := cmd.Flags().GetString("format")
 			return runExplain(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(),
-				dbPath, args[0], format, explain)
+				dbPath, rulesPath, args[0], format, explain, next)
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
 		"path to the SQLite evidence database")
+	cmd.Flags().StringVar(&rulesPath, "rules-file", "",
+		"path to a rules.yaml override (default: embedded rules; used by --next)")
 	cmd.Flags().BoolVar(&explain, "explain", false,
 		"ask the configured LLM for a plain-language explanation (needs ARCHAEOLOGIST_LLM_API_KEY)")
+	cmd.Flags().BoolVar(&next, "next", false,
+		"show the next steps: window progress and how to clear each blind spot")
 	addFormatFlag(cmd)
 	return cmd
 }
 
-func runExplain(ctx context.Context, w, errw io.Writer, dbPath, ref, format string, explain bool) error {
+func runExplain(ctx context.Context, w, errw io.Writer, dbPath, rulesPath, ref, format string, explain, next bool) error {
 	if err := validateFormat(format); err != nil {
 		return err
 	}
@@ -68,6 +75,20 @@ func runExplain(ctx context.Context, w, errw io.Writer, dbPath, ref, format stri
 		return err
 	}
 	payload := explainJSON(scanID, ent, evid, neighbors, blinds)
+	var nxt *nextJSON
+	if next {
+		win, err := st.Window(ctx, scanID)
+		if err != nil {
+			return err
+		}
+		r, _, err := rules.Load(rulesPath)
+		if err != nil {
+			return err
+		}
+		built := buildNext(win, r.Thresholds.ObservationWindowDays, blinds)
+		nxt = &built
+		payload["next"] = built
+	}
 	var llmText, label string
 	if explain {
 		label = labelExplanation
@@ -96,6 +117,11 @@ func runExplain(ctx context.Context, w, errw io.Writer, dbPath, ref, format stri
 	}
 	if err := printExplain(w, scanID, ent, evid, neighbors, blinds); err != nil {
 		return err
+	}
+	if nxt != nil {
+		if err := printNext(w, *nxt); err != nil {
+			return err
+		}
 	}
 	if explain && llmText != "" {
 		return printLLMExplain(w, label, llmText)

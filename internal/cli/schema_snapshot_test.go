@@ -118,6 +118,27 @@ func TestSchemaConformance_ScanDiffWithChanges(t *testing.T) {
 	}
 }
 
+func TestSchemaConformance_ExplainNext(t *testing.T) {
+	db := copyFixtureDB(t)
+	doc := decodeCLI(t,
+		"explain", "lab-worker",
+		"--db", db, "--next", "--format", "json")
+	if err := loadSchema(t, "explain.schema.json").Validate(doc); err != nil {
+		t.Errorf("explain --next output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+	if _, ok := doc["next"]; !ok {
+		t.Errorf("next object missing from explain --next output:\n%s", marshalDoc(t, doc))
+	}
+}
+
+func TestSchemaConformance_ObserveStatus(t *testing.T) {
+	db := copyFixtureDB(t)
+	doc := decodeCLI(t, "observe", "status", "--db", db, "--format", "json")
+	if err := loadSchema(t, "observe-status.schema.json").Validate(doc); err != nil {
+		t.Errorf("observe status output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+}
+
 // Negative proof: removing a required field must cause validation to
 // fail. Guards against a vacuous test (e.g. a schema that accepts
 // everything).
@@ -162,5 +183,37 @@ func TestSchemaConformance_ScanHistoryNegativeProof(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "verdict") {
 		t.Errorf("expected error to mention 'verdict'; got: %v", err)
+	}
+}
+
+// Negative proof for the remediation documents: the nested required
+// keys must be enforced, so the new definitions are not vacuous.
+func TestSchemaConformance_RemediationNegativeProof(t *testing.T) {
+	db := copyFixtureDB(t)
+
+	next := decodeCLI(t, "explain", "lab-worker", "--db", db, "--next", "--format", "json")
+	inner, ok := next["next"].(map[string]any)
+	if !ok {
+		t.Fatalf("next object missing:\n%s", marshalDoc(t, next))
+	}
+	delete(inner, "window")
+	err := loadSchema(t, "explain.schema.json").Validate(next)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping required next.window\ndoc:\n%s",
+			marshalDoc(t, next))
+	}
+	if !strings.Contains(err.Error(), "window") {
+		t.Errorf("expected error to mention 'window'; got: %v", err)
+	}
+
+	status := decodeCLI(t, "observe", "status", "--db", db, "--format", "json")
+	delete(status, "days_remaining")
+	err = loadSchema(t, "observe-status.schema.json").Validate(status)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping required 'days_remaining'\ndoc:\n%s",
+			marshalDoc(t, status))
+	}
+	if !strings.Contains(err.Error(), "days_remaining") {
+		t.Errorf("expected error to mention 'days_remaining'; got: %v", err)
 	}
 }
