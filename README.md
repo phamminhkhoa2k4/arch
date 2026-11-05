@@ -175,6 +175,24 @@ Run `explain` to see the exact blocker text and the evidence behind it.
 | `1` | Needs attention: `UNKNOWN`, `LIKELY_ORPHANED`, `ORPHANED`, or a broken-route finding. |
 | `2` | Execution error (bad database, unknown component, invalid flags, and so on). |
 
+## Scan history
+
+Every scan stays in the database, so you can review what changed between two
+of them:
+
+```sh
+./archaeologist scan list --db scan.db
+./archaeologist scan diff 1 2 --db scan.db
+```
+
+`scan list` prints one row per scan — id, start time, status, entity, blind-spot
+and finding counts, plus the verdict rollup when verdicts were computed.
+
+`scan diff <scan-a> <scan-b>` reports what changed between the two scans:
+entities added or removed, hard blockers that appeared or disappeared, new
+blind spots, evidence-coverage moves, and verdict-state changes. Each change
+list is capped at 20 lines; pass `--limit 0` to print them all.
+
 ## Observation mode
 
 A single scan is a snapshot. To distinguish “not running right now” from “not

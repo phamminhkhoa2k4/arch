@@ -46,6 +46,7 @@ func newScanCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
 		"path to the SQLite evidence database")
 	addFormatFlag(cmd)
+	cmd.AddCommand(newScanListCmd(), newScanDiffCmd())
 	return cmd
 }
 
@@ -275,19 +276,35 @@ func kernelRelease() string {
 	return strings.TrimSpace(string(b))
 }
 
-// formatVerdictRollup renders the scan-time health line in Vietnamese,
-// one entry per verdict state (zero counts included so the layout is
-// stable).
-func formatVerdictRollup(rollup map[string]int) string {
-	labels := []struct{ state, label string }{
-		{verdict.StateActive, "active"},
-		{verdict.StateUnknown, "unknown"},
-		{verdict.StateLikelyOrphaned, "likely-orphaned"},
-		{verdict.StateOrphaned, "orphaned"},
-	}
-	parts := make([]string, 0, len(labels))
-	for _, l := range labels {
+// verdictStateLabels pairs each verdict state with its display label.
+var verdictStateLabels = []struct{ state, label string }{
+	{verdict.StateActive, "active"},
+	{verdict.StateUnknown, "unknown"},
+	{verdict.StateLikelyOrphaned, "likely-orphaned"},
+	{verdict.StateOrphaned, "orphaned"},
+}
+
+// verdictRollupLine renders one entry per verdict state, zero counts
+// included so the layout is stable.
+func verdictRollupLine(rollup map[string]int) string {
+	parts := make([]string, 0, len(verdictStateLabels))
+	for _, l := range verdictStateLabels {
 		parts = append(parts, fmt.Sprintf("%s %d", l.label, rollup[l.state]))
 	}
-	return "  Verdict:   " + strings.Join(parts, " · ")
+	return strings.Join(parts, " · ")
+}
+
+// rollupDeltaLine renders one entry per verdict state with both
+// scans' counts, zero counts included.
+func rollupDeltaLine(from, to map[string]int) string {
+	parts := make([]string, 0, len(verdictStateLabels))
+	for _, l := range verdictStateLabels {
+		parts = append(parts, fmt.Sprintf("%s %d → %d", l.label, from[l.state], to[l.state]))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// formatVerdictRollup renders the scan-time health line.
+func formatVerdictRollup(rollup map[string]int) string {
+	return "  Verdict:   " + verdictRollupLine(rollup)
 }
