@@ -193,6 +193,12 @@ entities added or removed, hard blockers that appeared or disappeared, new
 blind spots, evidence-coverage moves, and verdict-state changes. Each change
 list is capped at 20 lines; pass `--limit 0` to print them all.
 
+Both commands accept `--format json` (contracts:
+[`scan-list.schema.json`](schema/scan-list.schema.json),
+[`scan-diff.schema.json`](schema/scan-diff.schema.json)). The `--limit` cap
+only shapes the text view — JSON output is always complete. A scan that never
+finished is reported with status `incomplete` and `finished_at: null`.
+
 ## Observation mode
 
 A single scan is a snapshot. To distinguish “not running right now” from “not
@@ -305,17 +311,20 @@ authentication; do not expose it to an untrusted network.
 
 ## JSON output and schemas
 
-Machine-readable output is available from `scan`, `delete-check`, `explain`,
-and `report`:
+Machine-readable output is available from `scan`, `scan list`, `scan diff`,
+`delete-check`, `explain`, and `report`:
 
 ```sh
 ./archaeologist scan --format json --db scan.db
+./archaeologist scan list --format json --db scan.db
 ./archaeologist delete-check --format json --db scan.db nginx.service
 ```
 
 The published contracts live in [`schema/`](schema/):
 
 - [`scan.schema.json`](schema/scan.schema.json)
+- [`scan-list.schema.json`](schema/scan-list.schema.json)
+- [`scan-diff.schema.json`](schema/scan-diff.schema.json)
 - [`delete-check.schema.json`](schema/delete-check.schema.json)
 - [`explain.schema.json`](schema/explain.schema.json)
 - [`report.schema.json`](schema/report.schema.json)

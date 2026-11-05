@@ -86,6 +86,38 @@ func TestSchemaConformance_Report(t *testing.T) {
 	}
 }
 
+func TestSchemaConformance_ScanList(t *testing.T) {
+	db := copyFixtureDB(t)
+	doc := decodeCLI(t, "scan", "list", "--db", db, "--format", "json")
+	if err := loadSchema(t, "scan-list.schema.json").Validate(doc); err != nil {
+		t.Errorf("scan list output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+}
+
+func TestSchemaConformance_ScanListWithVerdicts(t *testing.T) {
+	db := scanHistoryFixture(t)
+	doc := decodeCLI(t, "scan", "list", "--db", db, "--format", "json")
+	if err := loadSchema(t, "scan-list.schema.json").Validate(doc); err != nil {
+		t.Errorf("scan list (with verdicts) violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+}
+
+func TestSchemaConformance_ScanDiff(t *testing.T) {
+	db := copyFixtureDB(t)
+	doc := decodeCLI(t, "scan", "diff", "1", "2", "--db", db, "--format", "json")
+	if err := loadSchema(t, "scan-diff.schema.json").Validate(doc); err != nil {
+		t.Errorf("scan diff output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+}
+
+func TestSchemaConformance_ScanDiffWithChanges(t *testing.T) {
+	db := scanHistoryFixture(t)
+	doc := decodeCLI(t, "scan", "diff", "1", "2", "--db", db, "--format", "json")
+	if err := loadSchema(t, "scan-diff.schema.json").Validate(doc); err != nil {
+		t.Errorf("scan diff (with changes) violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+}
+
 // Negative proof: removing a required field must cause validation to
 // fail. Guards against a vacuous test (e.g. a schema that accepts
 // everything).
@@ -102,5 +134,33 @@ func TestSchemaConformance_NegativeProof(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "state") {
 		t.Errorf("expected error to mention 'state'; got: %v", err)
+	}
+}
+
+// Negative proof for the scan history documents: dropping a required
+// top-level key must make each schema reject its own output.
+func TestSchemaConformance_ScanHistoryNegativeProof(t *testing.T) {
+	db := copyFixtureDB(t)
+
+	list := decodeCLI(t, "scan", "list", "--db", db, "--format", "json")
+	delete(list, "scans")
+	err := loadSchema(t, "scan-list.schema.json").Validate(list)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping required 'scans'\ndoc:\n%s",
+			marshalDoc(t, list))
+	}
+	if !strings.Contains(err.Error(), "scans") {
+		t.Errorf("expected error to mention 'scans'; got: %v", err)
+	}
+
+	diff := decodeCLI(t, "scan", "diff", "1", "2", "--db", db, "--format", "json")
+	delete(diff, "verdict")
+	err = loadSchema(t, "scan-diff.schema.json").Validate(diff)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping required 'verdict'\ndoc:\n%s",
+			marshalDoc(t, diff))
+	}
+	if !strings.Contains(err.Error(), "verdict") {
+		t.Errorf("expected error to mention 'verdict'; got: %v", err)
 	}
 }

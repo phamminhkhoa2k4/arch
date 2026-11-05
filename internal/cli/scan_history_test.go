@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -193,9 +194,10 @@ func TestScanListEmpty(t *testing.T) {
 	}
 }
 
-// A scan row that never finished is reported as incomplete instead of
-// the status default it carries in the database.
-func TestScanListIncompleteScan(t *testing.T) {
+// unfinishedScanDB writes a database whose only scan row never reached
+// FinishScan, so it carries the status default with a null finish time.
+func unfinishedScanDB(t *testing.T) string {
+	t.Helper()
 	ctx := context.Background()
 	db := filepath.Join(t.TempDir(), "scan.db")
 	st, err := store.Open(ctx, db)
@@ -212,7 +214,13 @@ func TestScanListIncompleteScan(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
+	return db
+}
 
+// A scan row that never finished is reported as incomplete instead of
+// the status default it carries in the database.
+func TestScanListIncompleteScan(t *testing.T) {
+	db := unfinishedScanDB(t)
 	out, err := runCLI(t, "scan", "list", "--db", db)
 	if err != nil {
 		t.Fatalf("scan list: %v\n%s", err, out)
@@ -354,5 +362,88 @@ func TestScanHelpListsHistorySubcommands(t *testing.T) {
 		if !strings.Contains(out, name) {
 			t.Errorf("scan --help missing %q:\n%s", name, out)
 		}
+	}
+}
+
+// decodeScanList parses `scan list --format json` into its payload.
+func decodeScanList(t *testing.T, out string) scanListJSON {
+	t.Helper()
+	var doc scanListJSON
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("json parse: %v\noutput:\n%s", err, out)
+	}
+	return doc
+}
+
+// JSON output reports an unfinished scan with a null finish time and
+// the incomplete status, not the status default it carries in the row.
+func TestScanListJSONIncompleteScan(t *testing.T) {
+	db := unfinishedScanDB(t)
+	out, err := runCLI(t, "scan", "list", "--db", db, "--format", "json")
+	if err != nil {
+		t.Fatalf("scan list: %v\n%s", err, out)
+	}
+	doc := decodeScanList(t, out)
+	if len(doc.Scans) != 1 {
+		t.Fatalf("scans = %d, want 1:\n%s", len(doc.Scans), out)
+	}
+	row := doc.Scans[0]
+	if row.FinishedAt != nil {
+		t.Errorf("finished_at = %q, want null", *row.FinishedAt)
+	}
+	if row.Status != "incomplete" {
+		t.Errorf("status = %q, want incomplete", row.Status)
+	}
+	if row.Verdict != nil {
+		t.Errorf("verdict = %v, want null when no verdicts exist", row.Verdict)
+	}
+}
+
+// JSON output carries the full verdict rollup with every state key
+// when verdicts were computed.
+func TestScanListJSONVerdictRollup(t *testing.T) {
+	db := scanHistoryFixture(t)
+	out, err := runCLI(t, "scan", "list", "--db", db, "--format", "json")
+	if err != nil {
+		t.Fatalf("scan list: %v\n%s", err, out)
+	}
+	doc := decodeScanList(t, out)
+	if len(doc.Scans) != 2 {
+		t.Fatalf("scans = %d, want 2:\n%s", len(doc.Scans), out)
+	}
+	// Newest first: scan 2 has one ACTIVE and one ORPHANED verdict.
+	for _, key := range rollupKeys {
+		if _, ok := doc.Scans[0].Verdict[key]; !ok {
+			t.Errorf("verdict object missing key %q: %v", key, doc.Scans[0].Verdict)
+		}
+	}
+	if doc.Scans[0].Verdict[verdict.StateOrphaned] != 1 {
+		t.Errorf("orphaned = %d, want 1: %v",
+			doc.Scans[0].Verdict[verdict.StateOrphaned], doc.Scans[0].Verdict)
+	}
+}
+
+// JSON output is never capped by --limit, which only shapes the text
+// view.
+func TestScanDiffJSONNotCappedByLimit(t *testing.T) {
+	db := scanHistoryFixture(t)
+	out, err := runCLI(t, "scan", "diff", "1", "2", "--db", db,
+		"--limit", "1", "--format", "json")
+	if err != nil {
+		t.Fatalf("scan diff: %v\n%s", err, out)
+	}
+	var doc diffJSON
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("json parse: %v\noutput:\n%s", err, out)
+	}
+	if len(doc.Entities.Added) != 2 {
+		t.Errorf("added = %d, want 2 (the text limit must not apply):\n%s",
+			len(doc.Entities.Added), out)
+	}
+	if strings.Contains(out, "raise --limit") {
+		t.Errorf("JSON output carries a text truncation note:\n%s", out)
+	}
+	if len(doc.Verdict.Changes) != 1 {
+		t.Errorf("verdict changes = %d, want 1:\n%s", len(doc.Verdict.Changes), out)
 	}
 }

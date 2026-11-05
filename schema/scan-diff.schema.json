@@ -1,0 +1,187 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist scan diff --format json",
+  "type": "object",
+  "required": ["from", "to", "entities", "blockers", "blind_spots", "coverage", "verdict"],
+  "properties": {
+    "from": { "$ref": "#/definitions/scanRef" },
+    "to": { "$ref": "#/definitions/scanRef" },
+    "entities": { "$ref": "#/definitions/entities" },
+    "blockers": { "$ref": "#/definitions/blockers" },
+    "blind_spots": { "$ref": "#/definitions/blindSpots" },
+    "coverage": { "$ref": "#/definitions/coverage" },
+    "verdict": { "$ref": "#/definitions/verdict" }
+  },
+  "definitions": {
+    "scanRef": {
+      "type": "object",
+      "required": ["id", "started_at", "finished_at", "host", "status"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "started_at": { "type": "string" },
+        "finished_at": {
+          "type": ["string", "null"],
+          "description": "null when the scan never finished (crashed or still running)"
+        },
+        "host": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "partial", "failed", "incomplete"]
+        }
+      }
+    },
+    "entityRef": {
+      "type": "object",
+      "required": ["kind", "name", "identity_key"],
+      "properties": {
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "identity_key": { "type": "string" }
+      }
+    },
+    "kindDelta": {
+      "type": "object",
+      "required": ["kind", "from", "to", "delta"],
+      "properties": {
+        "kind": { "type": "string" },
+        "from": { "type": "integer", "minimum": 0 },
+        "to": { "type": "integer", "minimum": 0 },
+        "delta": { "type": "integer" }
+      }
+    },
+    "entities": {
+      "type": "object",
+      "required": ["from", "to", "delta", "kinds", "added", "removed"],
+      "properties": {
+        "from": { "type": "integer", "minimum": 0 },
+        "to": { "type": "integer", "minimum": 0 },
+        "delta": { "type": "integer" },
+        "kinds": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/kindDelta" }
+        },
+        "added": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/entityRef" }
+        },
+        "removed": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/entityRef" }
+        }
+      }
+    },
+    "blockerLine": {
+      "type": "object",
+      "required": ["kind", "name", "code", "text"],
+      "properties": {
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "text": { "type": "string" }
+      }
+    },
+    "blockers": {
+      "type": "object",
+      "required": ["from", "to", "delta", "new", "gone"],
+      "properties": {
+        "from": { "type": "integer", "minimum": 0 },
+        "to": { "type": "integer", "minimum": 0 },
+        "delta": { "type": "integer" },
+        "new": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/blockerLine" }
+        },
+        "gone": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/blockerLine" }
+        }
+      }
+    },
+    "blindLine": {
+      "type": "object",
+      "required": ["channel", "reason", "entity_kind", "entity_name"],
+      "properties": {
+        "channel": { "type": "string" },
+        "reason": { "type": "string" },
+        "entity_kind": {
+          "type": "string",
+          "description": "empty for host-wide blind spots"
+        },
+        "entity_name": {
+          "type": "string",
+          "description": "empty for host-wide blind spots"
+        }
+      }
+    },
+    "blindSpots": {
+      "type": "object",
+      "required": ["from", "to", "delta", "new", "gone"],
+      "properties": {
+        "from": { "type": "integer", "minimum": 0 },
+        "to": { "type": "integer", "minimum": 0 },
+        "delta": { "type": "integer" },
+        "new": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/blindLine" }
+        },
+        "gone": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/blindLine" }
+        }
+      }
+    },
+    "snapshotLine": {
+      "type": "object",
+      "required": ["kind", "name", "from", "to"],
+      "properties": {
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["from", "to", "changes"],
+      "properties": {
+        "from": { "$ref": "#/definitions/coverageBands" },
+        "to": { "$ref": "#/definitions/coverageBands" },
+        "changes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/snapshotLine" }
+        }
+      }
+    },
+    "coverageBands": {
+      "type": "object",
+      "required": ["HIGH", "MEDIUM", "LOW"],
+      "properties": {
+        "HIGH": { "type": "integer", "minimum": 0 },
+        "MEDIUM": { "type": "integer", "minimum": 0 },
+        "LOW": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "rollup": {
+      "type": "object",
+      "required": ["ACTIVE", "UNKNOWN", "LIKELY_ORPHANED", "ORPHANED"],
+      "properties": {
+        "ACTIVE": { "type": "integer", "minimum": 0 },
+        "UNKNOWN": { "type": "integer", "minimum": 0 },
+        "LIKELY_ORPHANED": { "type": "integer", "minimum": 0 },
+        "ORPHANED": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["from", "to", "changes"],
+      "properties": {
+        "from": { "$ref": "#/definitions/rollup" },
+        "to": { "$ref": "#/definitions/rollup" },
+        "changes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/snapshotLine" }
+        }
+      }
+    }
+  }
+}

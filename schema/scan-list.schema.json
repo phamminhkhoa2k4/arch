@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist scan list --format json",
+  "type": "object",
+  "required": ["scans"],
+  "properties": {
+    "scans": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/scan" }
+    }
+  },
+  "definitions": {
+    "scan": {
+      "type": "object",
+      "required": [
+        "id", "started_at", "finished_at", "host", "status",
+        "entities", "blind_spots", "findings", "verdict"
+      ],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "started_at": { "type": "string" },
+        "finished_at": {
+          "type": ["string", "null"],
+          "description": "null when the scan never finished (crashed or still running)"
+        },
+        "host": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "partial", "failed", "incomplete"]
+        },
+        "entities": { "type": "integer", "minimum": 0 },
+        "blind_spots": { "type": "integer", "minimum": 0 },
+        "findings": { "type": "integer", "minimum": 0 },
+        "verdict": {
+          "type": ["object", "null"],
+          "description": "null when no verdicts were computed for the scan",
+          "required": ["ACTIVE", "UNKNOWN", "LIKELY_ORPHANED", "ORPHANED"],
+          "properties": {
+            "ACTIVE": { "type": "integer", "minimum": 0 },
+            "UNKNOWN": { "type": "integer", "minimum": 0 },
+            "LIKELY_ORPHANED": { "type": "integer", "minimum": 0 },
+            "ORPHANED": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}
