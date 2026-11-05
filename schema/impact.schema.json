@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist impact --format json",
+  "type": "object",
+  "required": [
+    "scan_id", "kind", "name", "identity", "verdict",
+    "inbound", "outbound", "deployed_by", "scheduled_by",
+    "related_by_kind", "broken_route_risk", "blind_spots"
+  ],
+  "properties": {
+    "scan_id": { "type": "integer", "minimum": 1 },
+    "kind": { "type": "string" },
+    "name": { "type": "string" },
+    "identity": { "type": "string" },
+    "verdict": {
+      "type": ["object", "null"],
+      "description": "null when no verdict was computed for this component",
+      "required": ["state", "coverage", "blockers"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["ACTIVE", "LIKELY_ORPHANED", "ORPHANED", "UNKNOWN"]
+        },
+        "coverage": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] },
+        "blockers": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "inbound": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/edge" }
+    },
+    "outbound": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/edge" }
+    },
+    "deployed_by": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/edge" }
+    },
+    "scheduled_by": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/edge" }
+    },
+    "related_by_kind": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "components"],
+        "properties": {
+          "kind": { "type": "string" },
+          "components": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "broken_route_risk": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/finding" }
+    },
+    "blind_spots": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/blind" }
+    }
+  },
+  "definitions": {
+    "edge": {
+      "type": "object",
+      "required": [
+        "edge_kind", "strength", "neighbor_kind", "neighbor_name",
+        "neighbor_identity", "channel", "raw_ref"
+      ],
+      "properties": {
+        "edge_kind": { "type": "string" },
+        "strength": {
+          "type": "string",
+          "enum": ["deterministic", "strong_heuristic", "weak_heuristic"]
+        },
+        "neighbor_kind": { "type": "string" },
+        "neighbor_name": { "type": "string" },
+        "neighbor_identity": { "type": "string" },
+        "channel": { "type": "string" },
+        "raw_ref": { "type": "string" }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["id", "severity", "entity_kind", "entity_name", "detail"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "severity": { "type": "string", "enum": ["info", "warn"] },
+        "entity_kind": { "type": "string" },
+        "entity_name": { "type": "string" },
+        "detail": { "type": "object" }
+      }
+    },
+    "blind": {
+      "type": "object",
+      "required": ["channel", "reason", "detail"],
+      "properties": {
+        "channel": { "type": "string" },
+        "reason": { "type": "string" },
+        "detail": { "type": "object" }
+      }
+    }
+  }
+}

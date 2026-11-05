@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // FindingRow describes one finding joined with its entity for the
@@ -65,6 +66,57 @@ func (s *Store) FindingsInScan(ctx context.Context, scanID int64) ([]FindingRow,
 	}
 	if err := rs.Err(); err != nil {
 		return nil, fmt.Errorf("findings in scan %d: %w", scanID, err)
+	}
+	return out, nil
+}
+
+// FindingsForEntities lists findings of one kind attached to any of
+// the given entities (all from one scan), ordered by id so output is
+// deterministic. The kind filter keeps callers precise — a cleanup
+// impact view asks for broken routes, not every finding.
+func (s *Store) FindingsForEntities(ctx context.Context, kind string, entityIDs []int64) ([]FindingRow, error) {
+	if len(entityIDs) == 0 {
+		return nil, nil
+	}
+	ph := make([]string, len(entityIDs))
+	args := make([]any, 0, len(entityIDs)+1)
+	args = append(args, kind)
+	for i, id := range entityIDs {
+		ph[i] = "?"
+		args = append(args, id)
+	}
+	query := fmt.Sprintf(`
+		SELECT f.id, f.kind, f.severity, f.detail_json, f.evidence_id,
+		       e.kind, e.name, e.identity_key
+		 FROM findings f JOIN entities e ON e.id = f.entity_id
+		 WHERE f.kind = ? AND f.entity_id IN (%s)
+		 ORDER BY f.id`, strings.Join(ph, ","))
+	rs, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("findings for entities: %w", err)
+	}
+	defer func() { _ = rs.Close() }()
+
+	var out []FindingRow
+	for rs.Next() {
+		var r FindingRow
+		var detailJSON string
+		var evidenceID *int64
+		if err := rs.Scan(&r.ID, &r.Kind, &r.Severity, &detailJSON, &evidenceID,
+			&r.EntityKind, &r.EntityName, &r.Identity); err != nil {
+			return nil, fmt.Errorf("findings for entities: %w", err)
+		}
+		if evidenceID != nil {
+			r.EvidenceID = *evidenceID
+		}
+		r.Detail = map[string]string{}
+		if detailJSON != "" && detailJSON != "null" {
+			_ = json.Unmarshal([]byte(detailJSON), &r.Detail)
+		}
+		out = append(out, r)
+	}
+	if err := rs.Err(); err != nil {
+		return nil, fmt.Errorf("findings for entities: %w", err)
 	}
 	return out, nil
 }

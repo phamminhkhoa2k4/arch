@@ -139,6 +139,25 @@ func TestSchemaConformance_ObserveStatus(t *testing.T) {
 	}
 }
 
+func TestSchemaConformance_Impact(t *testing.T) {
+	db := copyFixtureDB(t)
+	doc := decodeCLI(t, "impact", "lab-worker", "--db", db, "--format", "json")
+	if err := loadSchema(t, "impact.schema.json").Validate(doc); err != nil {
+		t.Errorf("impact output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+	if doc["verdict"] != nil {
+		t.Errorf("verdict = %v, want null for the fixture's empty verdict table", doc["verdict"])
+	}
+}
+
+func TestSchemaConformance_ImpactWithRisks(t *testing.T) {
+	db := impactFixture(t)
+	doc := decodeCLI(t, "impact", "app.service", "--db", db, "--format", "json")
+	if err := loadSchema(t, "impact.schema.json").Validate(doc); err != nil {
+		t.Errorf("impact (with verdict and risk) violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+}
+
 // Negative proof: removing a required field must cause validation to
 // fail. Guards against a vacuous test (e.g. a schema that accepts
 // everything).
@@ -215,5 +234,16 @@ func TestSchemaConformance_RemediationNegativeProof(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "days_remaining") {
 		t.Errorf("expected error to mention 'days_remaining'; got: %v", err)
+	}
+
+	impact := decodeCLI(t, "impact", "lab-worker", "--db", db, "--format", "json")
+	delete(impact, "inbound")
+	err = loadSchema(t, "impact.schema.json").Validate(impact)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping required 'inbound'\ndoc:\n%s",
+			marshalDoc(t, impact))
+	}
+	if !strings.Contains(err.Error(), "inbound") {
+		t.Errorf("expected error to mention 'inbound'; got: %v", err)
 	}
 }

@@ -206,6 +206,21 @@ Both commands accept `--format json` (contracts:
 only shapes the text view — JSON output is always complete. A scan that never
 finished is reported with status `incomplete` and `finished_at: null`.
 
+## Impact analysis
+
+Before generating a cleanup plan, see what a cleanup would touch:
+
+```sh
+./archaeologist impact --db scan.db lab-worker
+```
+
+`impact` only reads the database: it lists inbound dependents (what would
+break), outbound dependencies, deployment and schedule edges, related
+components grouped by kind (routes, units, jobs, listeners, volumes, images),
+broken-route risk in the component's neighbourhood, and the blind spots
+affecting the conclusion. It accepts `--format json` (contract:
+[`impact.schema.json`](schema/impact.schema.json)).
+
 ## Observation mode
 
 A single scan is a snapshot. To distinguish “not running right now” from “not
@@ -330,7 +345,7 @@ authentication; do not expose it to an untrusted network.
 ## JSON output and schemas
 
 Machine-readable output is available from `scan`, `scan list`, `scan diff`,
-`observe status`, `delete-check`, `explain`, and `report`:
+`observe status`, `impact`, `delete-check`, `explain`, and `report`:
 
 ```sh
 ./archaeologist scan --format json --db scan.db
@@ -344,6 +359,7 @@ The published contracts live in [`schema/`](schema/):
 - [`scan-list.schema.json`](schema/scan-list.schema.json)
 - [`scan-diff.schema.json`](schema/scan-diff.schema.json)
 - [`observe-status.schema.json`](schema/observe-status.schema.json)
+- [`impact.schema.json`](schema/impact.schema.json)
 - [`delete-check.schema.json`](schema/delete-check.schema.json)
 - [`explain.schema.json`](schema/explain.schema.json)
 - [`report.schema.json`](schema/report.schema.json)
