@@ -35,8 +35,9 @@ func newPlanCmd() *cobra.Command {
 		Short: "Generate a staged cleanup plan with rollback commands",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			format, _ := cmd.Flags().GetString("format")
 			return runPlanGenerate(cmd.Context(), cmd.OutOrStdout(),
-				args[0], dbPath, rulesPath, outDir)
+				args[0], dbPath, rulesPath, outDir, format)
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
@@ -45,6 +46,7 @@ func newPlanCmd() *cobra.Command {
 		"path to a rules.yaml override (default: embedded rules)")
 	cmd.Flags().StringVar(&outDir, "out", defaultPlanOut,
 		"directory the plan files are written into")
+	addFormatFlag(cmd)
 	cmd.AddCommand(newPlanStatusCmd(), newPlanConfirmCmd(), newPlanCheckCmd())
 	return cmd
 }
@@ -93,8 +95,9 @@ func newPlanCheckCmd() *cobra.Command {
 		Short: "Verify a generated plan still matches its scan, rules and scripts",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			format, _ := cmd.Flags().GetString("format")
 			return runPlanCheck(cmd.Context(), cmd.OutOrStdout(),
-				args[0], dbPath, rulesPath, outDir)
+				args[0], dbPath, rulesPath, outDir, format)
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "archaeologist.db",
@@ -103,17 +106,62 @@ func newPlanCheckCmd() *cobra.Command {
 		"path to a rules.yaml override (default: embedded rules)")
 	cmd.Flags().StringVar(&outDir, "out", defaultPlanOut,
 		"directory holding the generated plan")
+	addFormatFlag(cmd)
 	return cmd
 }
 
-func runPlanGenerate(ctx context.Context, w io.Writer, ref, dbPath, rulesPath, outDir string) error {
+// planGenerateDoc is the machine-readable plan generation result. The
+// eligibility flag is the contract: refusal still emits a valid
+// document (eligible false plus the verdict) before the command exits
+// with the attention code, so JSON consumers never see a bare error.
+type planGenerateDoc struct {
+	Eligible    bool           `json:"eligible"`
+	Kind        string         `json:"kind"`
+	Name        string         `json:"name"`
+	IdentityKey string         `json:"identity_key"`
+	Verdict     planVerdictDoc `json:"verdict"`
+	PlanID      int64          `json:"plan_id,omitempty"`
+	Dir         string         `json:"dir,omitempty"`
+	Files       []string       `json:"files,omitempty"`
+	Stages      []string       `json:"stages,omitempty"`
+}
+
+// planVerdictDoc is the verdict slice shared by generation output.
+type planVerdictDoc struct {
+	State   string   `json:"state"`
+	Reasons []string `json:"reasons"`
+}
+
+// planCheckDoc is the machine-readable plan check result.
+type planCheckDoc struct {
+	OK       bool             `json:"ok"`
+	Dir      string           `json:"dir"`
+	Problems []string         `json:"problems"`
+	Warnings []string         `json:"warnings"`
+	Manifest cleanup.Manifest `json:"manifest"`
+}
+
+func runPlanGenerate(ctx context.Context, w io.Writer, ref, dbPath, rulesPath, outDir, format string) error {
+	if err := validateFormat(format); err != nil {
+		return err
+	}
 	ev, err := evaluateComponent(ctx, dbPath, rulesPath, ref)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = ev.st.Close() }()
+	doc := planGenerateDoc{
+		Kind:        ev.ent.Kind,
+		Name:        ev.ent.Name,
+		IdentityKey: ev.ent.IdentityKey,
+		Verdict:     planVerdictDoc{State: ev.res.State, Reasons: nonNilStrings(ev.res.Reasons)},
+	}
 	if !planEligible(ev.res.State) {
-		if err := printPlanRefusal(w, ev.res); err != nil {
+		if format == formatJSON {
+			if err := writeJSON(w, doc); err != nil {
+				return err
+			}
+		} else if err := printPlanRefusal(w, ev.res); err != nil {
 			return err
 		}
 		return attention(fmt.Errorf("verdict %s is not eligible for a cleanup plan", ev.res.State))
@@ -137,6 +185,14 @@ func runPlanGenerate(ctx context.Context, w io.Writer, ref, dbPath, rulesPath, o
 	dir, files, err := cleanup.WritePlan(outDir, plan, planMeta(ev.res))
 	if err != nil {
 		return err
+	}
+	if format == formatJSON {
+		doc.Eligible = true
+		doc.PlanID = planID
+		doc.Dir = dir
+		doc.Files = files
+		doc.Stages = append([]string{}, cleanup.StageNames...)
+		return writeJSON(w, doc)
 	}
 	_, _ = fmt.Fprintf(w, "Generated a 6-stage plan for %s (%s) — %d files in %s\n",
 		ev.ent.Name, ev.ent.Kind, len(files), dir)
@@ -212,7 +268,10 @@ func runPlanConfirm(ctx context.Context, w io.Writer, ref, stage, dbPath string)
 // runPlanCheck verifies a generated plan against its manifest and,
 // where the database and rules file are readable, against the current
 // scan and rules. It never runs a stage script.
-func runPlanCheck(ctx context.Context, w io.Writer, ref, dbPath, rulesPath, outDir string) error {
+func runPlanCheck(ctx context.Context, w io.Writer, ref, dbPath, rulesPath, outDir, format string) error {
+	if err := validateFormat(format); err != nil {
+		return err
+	}
 	ev, err := evaluateComponent(ctx, dbPath, rulesPath, ref)
 	if err != nil {
 		return err
@@ -261,13 +320,33 @@ func runPlanCheck(ctx context.Context, w io.Writer, ref, dbPath, rulesPath, outD
 		}
 	}
 
-	if _, err := io.WriteString(w, res.Format()); err != nil {
+	if format == formatJSON {
+		doc := planCheckDoc{
+			OK:       res.OK(),
+			Dir:      res.Dir,
+			Problems: nonNilStrings(res.Problems),
+			Warnings: nonNilStrings(res.Warnings),
+			Manifest: res.Manifest,
+		}
+		if err := writeJSON(w, doc); err != nil {
+			return err
+		}
+	} else if _, err := io.WriteString(w, res.Format()); err != nil {
 		return err
 	}
 	if !res.OK() {
 		return attention(fmt.Errorf("plan check found %d problem(s)", len(res.Problems)))
 	}
 	return nil
+}
+
+// nonNilStrings keeps JSON arrays as [] rather than null so the
+// published schemas can require type array unconditionally.
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 // evalResult is one resolved component plus the provenance a cleanup

@@ -174,6 +174,125 @@ func TestSchemaConformance_ImpactWithRisks(t *testing.T) {
 	}
 }
 
+// The plan generation document satisfies its published contract, both
+// for an eligible run (files written) and for a refusal (eligible false).
+func TestSchemaConformance_PlanGenerate(t *testing.T) {
+	db := copyFixtureDB(t)
+	outDir := t.TempDir()
+	doc := decodeCLI(t,
+		"plan", "lab-worker",
+		"--db", db, "--rules-file", labRules(), "--out", outDir, "--format", "json")
+	if err := loadSchema(t, "plan.schema.json").Validate(doc); err != nil {
+		t.Errorf("plan output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+	if doc["eligible"] != true {
+		t.Errorf("eligible = %v, want true\n%s", doc["eligible"], marshalDoc(t, doc))
+	}
+	stages, ok := doc["stages"].([]any)
+	if !ok || len(stages) != 6 {
+		t.Errorf("stages = %v, want 6 entries\n%s", doc["stages"], marshalDoc(t, doc))
+	}
+}
+
+// A refused plan still emits a schema-valid document before the
+// command exits with the attention code.
+func TestSchemaConformance_PlanGenerateRefused(t *testing.T) {
+	db := copyFixtureDB(t)
+	doc := decodeCLI(t,
+		"plan", "lab-web",
+		"--db", db, "--out", t.TempDir(), "--format", "json")
+	if err := loadSchema(t, "plan.schema.json").Validate(doc); err != nil {
+		t.Errorf("refused plan output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+	if doc["eligible"] != false {
+		t.Errorf("eligible = %v, want false\n%s", doc["eligible"], marshalDoc(t, doc))
+	}
+	for _, key := range []string{"plan_id", "dir", "files", "stages"} {
+		if _, present := doc[key]; present {
+			t.Errorf("refused document must omit %q\n%s", key, marshalDoc(t, doc))
+		}
+	}
+}
+
+// The plan check document satisfies its published contract.
+func TestSchemaConformance_PlanCheck(t *testing.T) {
+	db := copyFixtureDB(t)
+	outDir := t.TempDir()
+	if _, err := runCLI(t,
+		"plan", "lab-worker",
+		"--db", db, "--rules-file", labRules(), "--out", outDir, "--format", "json"); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	doc := decodeCLI(t,
+		"plan", "check", "lab-worker",
+		"--db", db, "--rules-file", labRules(), "--out", outDir, "--format", "json")
+	if err := loadSchema(t, "plan-check.schema.json").Validate(doc); err != nil {
+		t.Errorf("plan check output violates schema: %v\ndoc:\n%s", err, marshalDoc(t, doc))
+	}
+	if doc["ok"] != true {
+		t.Errorf("ok = %v, want true\n%s", doc["ok"], marshalDoc(t, doc))
+	}
+	manifest, ok := doc["manifest"].(map[string]any)
+	if !ok {
+		t.Fatalf("manifest missing:\n%s", marshalDoc(t, doc))
+	}
+	if _, ok := manifest["scripts"]; !ok {
+		t.Errorf("manifest.scripts missing:\n%s", marshalDoc(t, doc))
+	}
+}
+
+// Negative proof for the plan documents: dropping a required top-level
+// key must make each schema reject its own output.
+func TestSchemaConformance_PlanNegativeProof(t *testing.T) {
+	db := copyFixtureDB(t)
+	outDir := t.TempDir()
+
+	doc := decodeCLI(t,
+		"plan", "lab-worker",
+		"--db", db, "--rules-file", labRules(), "--out", outDir, "--format", "json")
+	delete(doc, "eligible")
+	err := loadSchema(t, "plan.schema.json").Validate(doc)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping required 'eligible'\ndoc:\n%s",
+			marshalDoc(t, doc))
+	}
+	if !strings.Contains(err.Error(), "eligible") {
+		t.Errorf("expected error to mention 'eligible'; got: %v", err)
+	}
+
+	// The eligible document must also fail when a nested required key
+	// disappears, so the conditional branch is not vacuous.
+	doc = decodeCLI(t,
+		"plan", "lab-worker",
+		"--db", db, "--rules-file", labRules(), "--out", outDir, "--format", "json")
+	inner, ok := doc["verdict"].(map[string]any)
+	if !ok {
+		t.Fatalf("verdict object missing:\n%s", marshalDoc(t, doc))
+	}
+	delete(inner, "state")
+	err = loadSchema(t, "plan.schema.json").Validate(doc)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping verdict.state\ndoc:\n%s",
+			marshalDoc(t, doc))
+	}
+	if !strings.Contains(err.Error(), "state") {
+		t.Errorf("expected error to mention 'state'; got: %v", err)
+	}
+
+	check := decodeCLI(t,
+		"plan", "check", "lab-worker",
+		"--db", db, "--rules-file", labRules(), "--out", outDir, "--format", "json")
+	delete(check, "manifest")
+	err = loadSchema(t, "plan-check.schema.json").Validate(check)
+	if err == nil {
+		t.Fatalf("expected validation error after dropping required 'manifest'\ndoc:\n%s",
+			marshalDoc(t, check))
+	}
+	if !strings.Contains(err.Error(), "manifest") {
+		t.Errorf("expected error to mention 'manifest'; got: %v", err)
+	}
+}
+
 // Negative proof: removing a required field must cause validation to
 // fail. Guards against a vacuous test (e.g. a schema that accepts
 // everything).

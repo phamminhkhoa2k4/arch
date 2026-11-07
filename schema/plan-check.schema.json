@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist plan check <component> --format json",
+  "type": "object",
+  "required": ["ok", "dir", "problems", "warnings", "manifest"],
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "false when any hard problem was found; the command then exits non-zero"
+    },
+    "dir": { "type": "string", "minLength": 1 },
+    "problems": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "conditions that make the plan unsafe to run"
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "conditions worth reviewing that do not block"
+    },
+    "manifest": {
+      "type": "object",
+      "required": [
+        "manifest_version", "tool_version", "generated_at", "scan_id",
+        "rules_hash", "db_path", "binary_path", "component", "verdict", "scripts"
+      ],
+      "properties": {
+        "manifest_version": { "type": "integer", "minimum": 1 },
+        "tool_version": { "type": "string" },
+        "generated_at": { "type": "string" },
+        "scan_id": { "type": "integer", "minimum": 0 },
+        "rules_hash": { "type": "string" },
+        "db_path": { "type": "string" },
+        "rules_path": { "type": "string" },
+        "binary_path": { "type": "string" },
+        "component": {
+          "type": "object",
+          "required": ["kind", "name", "identity_key", "ref"],
+          "properties": {
+            "kind": { "type": "string" },
+            "name": { "type": "string" },
+            "identity_key": { "type": "string" },
+            "ref": { "type": "string" },
+            "fingerprint": { "type": "string" }
+          }
+        },
+        "verdict": {
+          "type": "object",
+          "required": ["state", "coverage", "window"],
+          "properties": {
+            "state": { "type": "string" },
+            "coverage": { "type": "string" },
+            "window": { "type": "string" }
+          }
+        },
+        "scripts": {
+          "type": "object",
+          "description": "stage script file name -> SHA-256 of its bytes at generation time",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  }
+}

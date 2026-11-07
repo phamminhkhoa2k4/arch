@@ -324,6 +324,11 @@ Run `plan check` before executing anything:
 ./archaeologist plan check --db scan.db nginx.service
 ```
 
+Both `plan` and `plan check` accept `--format json` for automation: a refused
+plan still emits a valid document (`eligible: false`) before the command exits
+non-zero, and `plan check` reports `ok`, `problems`, `warnings` and the parsed
+manifest.
+
 It fails with a non-zero exit code when:
 
 - a stage script was edited after generation;
@@ -389,6 +394,8 @@ The published contracts live in [`schema/`](schema/):
 - [`delete-check-all.schema.json`](schema/delete-check-all.schema.json)
 - [`explain.schema.json`](schema/explain.schema.json)
 - [`report.schema.json`](schema/report.schema.json)
+- [`plan.schema.json`](schema/plan.schema.json)
+- [`plan-check.schema.json`](schema/plan-check.schema.json)
 
 Schema conformance tests validate the CLI output, including a negative proof
 that removing a required field is rejected.

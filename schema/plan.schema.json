@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "archaeologist plan <component> --format json",
+  "type": "object",
+  "required": ["eligible", "kind", "name", "identity_key", "verdict"],
+  "properties": {
+    "eligible": {
+      "type": "boolean",
+      "description": "true only when a plan was written; a refusal still emits this document with eligible=false and exits non-zero"
+    },
+    "kind": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "identity_key": { "type": "string", "minLength": 1 },
+    "verdict": {
+      "type": "object",
+      "required": ["state", "reasons"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "description": "verdict state; only LIKELY_ORPHANED or ORPHANED can be eligible"
+        },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "plan_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "database plan id (eligible runs only)"
+    },
+    "dir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "plan directory that was written (eligible runs only)"
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "every file WritePlan created (eligible runs only)"
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "string",
+        "enum": ["Candidate", "Quarantined", "Observed", "Archived", "Removed", "Verified"]
+      },
+      "description": "the fixed six-stage machine in order (eligible runs only)"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["eligible"],
+        "properties": { "eligible": { "const": true } }
+      },
+      "then": { "required": ["plan_id", "dir", "files", "stages"] }
+    },
+    {
+      "if": {
+        "required": ["eligible"],
+        "properties": { "eligible": { "const": false } }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["plan_id"] },
+            { "required": ["dir"] },
+            { "required": ["files"] },
+            { "required": ["stages"] }
+          ]
+        }
+      }
+    }
+  ]
+}
