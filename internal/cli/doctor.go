@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"archaeologist/internal/procfs"
+	"archaeologist/internal/store"
 )
 
 // doctorCheck is one access probe. fail and hint carry the user-facing
@@ -21,9 +22,10 @@ type doctorCheck struct {
 	run  func() error
 }
 
-// realChecks returns the probes against the live system. Every probe is
-// read-only (stat / read-dir / connect-and-close), never a write.
-func realChecks() []doctorCheck {
+// realChecks returns the probes against the live system plus the
+// database safety probes for dbPath. Every probe is read-only
+// (stat / read-dir / connect-and-close / header read), never a write.
+func realChecks(dbPath string) []doctorCheck {
 	return []doctorCheck{
 		{
 			pass: "Foreign-user processes (read /proc/<pid>/fd)",
@@ -80,6 +82,18 @@ func realChecks() []doctorCheck {
 				_, err := os.ReadDir("/etc/cron.d")
 				return err
 			},
+		},
+		{
+			pass: fmt.Sprintf("Database schema version (v%d)", store.SchemaVersion),
+			fail: "Database schema is not readable",
+			hint: "point --db at the archaeologist scan database (a fresh file is created on first run)",
+			run:  checkSchemaVersion(dbPath),
+		},
+		{
+			pass: "Database file permissions (owner-only)",
+			fail: "Database file permissions are too open",
+			hint: "chmod 600 the database file — evidence must stay owner-only on multi-user hosts",
+			run:  checkDBPermissions(dbPath),
 		},
 	}
 }
@@ -144,15 +158,82 @@ func checkUnixSocket(path string) func() error {
 	}
 }
 
+// richError lets a probe attach its own user-facing detail and hint:
+// schema and permission failures name the file and the exact remedy,
+// which the static fail/hint pair cannot carry.
+type richError struct {
+	detail string
+	hint   string
+}
+
+func (e *richError) Error() string { return e.detail }
+
+// checkSchemaVersion reads the schema version straight from the file
+// header — no open, no WAL sidecar, doctor stays read-only. A missing
+// file passes: the first real command creates it at the current
+// version. A database from a newer build fails with an upgrade hint.
+func checkSchemaVersion(path string) func() error {
+	return func() error {
+		v, exists, err := store.ReadSchemaVersion(path)
+		if err != nil {
+			return &richError{
+				detail: fmt.Sprintf("Database schema unreadable: %v", err),
+				hint:   "point --db at the archaeologist scan database (a fresh file is created on first run)",
+			}
+		}
+		if !exists {
+			return nil
+		}
+		if v > store.SchemaVersion {
+			return &richError{
+				detail: fmt.Sprintf("Database has schema v%d but this build supports v%d", v, store.SchemaVersion),
+				hint:   "upgrade archaeologist — opening a newer database could drop data this build does not understand",
+			}
+		}
+		return nil
+	}
+}
+
+// checkDBPermissions flags a database other accounts can read. The
+// evidence database records what runs on the host, so on a multi-user
+// machine a loose mode is a disclosure risk, not a style issue.
+func checkDBPermissions(path string) func() error {
+	return func() error {
+		fi, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // created owner-only by the first open
+		}
+		if err != nil {
+			return &richError{
+				detail: fmt.Sprintf("Database file not stat-able: %v", err),
+				hint:   "check the --db path",
+			}
+		}
+		if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+			return &richError{
+				detail: fmt.Sprintf("Database %s is readable by other users (mode %04o)", path, perm),
+				hint: fmt.Sprintf("chmod 600 %s — the evidence database exposes infrastructure detail to every account on a multi-user host",
+					path),
+			}
+		}
+		return nil
+	}
+}
+
 // runDoctor prints one line per check plus the final summary line stating
 // whether every source is available.
 func runDoctor(w io.Writer, checks []doctorCheck) bool {
-	_, _ = fmt.Fprintln(w, "Checking source access (read-only):")
+	_, _ = fmt.Fprintln(w, "Checking source access and database safety (read-only):")
 	available := true
 	for _, c := range checks {
 		if err := c.run(); err != nil {
 			available = false
-			_, _ = fmt.Fprintf(w, "✗ %s\n   Hint: %s\n", c.fail, c.hint)
+			detail, hint := c.fail, c.hint
+			var re *richError
+			if errors.As(err, &re) {
+				detail, hint = re.detail, re.hint
+			}
+			_, _ = fmt.Fprintf(w, "✗ %s\n   Hint: %s\n", detail, hint)
 			continue
 		}
 		_, _ = fmt.Fprintf(w, "✓ %s\n", c.pass)
