@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -37,6 +38,11 @@ func OpenBulk(ctx context.Context, path string) (*Store, error) {
 }
 
 func open(ctx context.Context, path, extraPragma string) (*Store, error) {
+	// The evidence database can expose infrastructure detail, so it is
+	// created (and re-tightened) as owner-only before any write.
+	if err := secureFile(path); err != nil {
+		return nil, fmt.Errorf("secure db file: %w", err)
+	}
 	// WAL lets a concurrent scan writer and the observe daemon write
 	// without the ping-pong that starved busy_timeout in journal mode
 	// DELETE; the timeout covers the residual writer-writer overlap.
@@ -54,17 +60,46 @@ func open(ctx context.Context, path, extraPragma string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// Migration may have created WAL sidecars; they inherit the same
+	// owner-only mode.
+	tightenSidecars(path)
 	return s, nil
 }
 
-// Migrate creates every schema object on an empty database.
-// Running it repeatedly is a no-op (IF NOT EXISTS throughout).
-func (s *Store) Migrate(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, schemaSQL); err != nil {
-		return fmt.Errorf("migrate: %w", err)
+// secureFile makes sure path exists with mode 0600. An existing file
+// with group/world access is tightened: the database holds evidence
+// about the whole host and must not be readable by other accounts.
+func secureFile(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	fi, err := f.Stat()
+	cerr := f.Close()
+	if err != nil {
+		return err
+	}
+	if cerr != nil {
+		return cerr
+	}
+	if fi.Mode().Perm() != 0o600 {
+		return os.Chmod(path, 0o600)
 	}
 	return nil
 }
+
+// tightenSidecars applies the owner-only mode to the WAL and shared
+// memory files SQLite creates next to the database.
+func tightenSidecars(path string) {
+	for _, suffix := range []string{"-wal", "-shm"} {
+		p := path + suffix
+		if fi, err := os.Stat(p); err == nil && fi.Mode().Perm() != 0o600 {
+			_ = os.Chmod(p, 0o600)
+		}
+	}
+}
+
+// Migrate lives in migrate.go with the schema version bookkeeping.
 
 // Tables reports the names of user tables created by the schema.
 func (s *Store) Tables(ctx context.Context) ([]string, error) {
