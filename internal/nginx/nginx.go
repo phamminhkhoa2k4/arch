@@ -54,6 +54,10 @@ type Route struct {
 	Location   string
 	SetVars    []string
 	Target     *Target
+	// Resolved cites the static variable definitions that turned a
+	// runtime-looking target into a classifiable one; nil means the
+	// target needed no substitution or none was provable.
+	Resolved []VarRef
 }
 
 // Key is the deterministic identity of the route.
@@ -174,7 +178,11 @@ func (l *Loader) Load(root string) (*Config, error) {
 		cfg.Errors = append(cfg.Errors, fe)
 	}
 
-	l.walk(payload, 0, ctx{}, cfg, map[string]bool{}, map[string]string{})
+	vi := newVarIndex()
+	l.walk(payload, 0, ctx{vars: vi}, cfg, map[string]bool{}, map[string]string{})
+	// After the whole tree is known, substitute statically-proven
+	// variables into targets that contain runtime references.
+	resolveRoutes(cfg, vi)
 	return cfg, nil
 }
 
@@ -186,6 +194,22 @@ type ctx struct {
 	ups    *Upstream  // non-nil inside an upstream block
 	loc    *Route     // non-nil inside a location block
 	prefix string     // accumulated location path of parent locations
+	vars   *varIndex  // shared assignments collected across the tree
+	m      *mapAcc    // non-nil while walking a map block
+}
+
+// scopeDepth ranks the context a definition was written in so the
+// innermost assignment wins at lookup time.
+func (c *ctx) scopeDepth() int {
+	switch {
+	case c.loc != nil:
+		return 3
+	case c.srv != nil:
+		return 2
+	case c.inHTTP:
+		return 1
+	}
+	return 0
 }
 
 type serverAcc struct {
@@ -230,11 +254,39 @@ func (l *Loader) walkBlock(
 			continue
 		}
 
+		// Inside a map block every directive is an entry (key →
+		// result) or a parameter; none of the config directives
+		// above apply here.
+		if c.m != nil {
+			switch {
+			case d.Directive == "include":
+				// The entry file is not parsed: results unknown.
+				c.m.poisoned = true
+			case d.Directive == "hostnames", d.Directive == "volatile":
+				// Parameters that do not change result values.
+			case len(d.Args) == 1:
+				if d.Directive == "default" {
+					c.m.hasDefault = true
+				}
+				c.m.results = append(c.m.results, d.Args[0])
+			default:
+				c.m.poisoned = true // unknown shape: refuse to conclude
+			}
+			continue
+		}
+
 		switch {
 		case d.Directive == "include":
 			for _, i := range d.Includes {
 				l.walk(payload, i, c, cfg, visited, digests)
 			}
+
+		case d.Directive == "map" && d.IsBlock() && len(d.Args) == 2:
+			ma := &mapAcc{dest: d.Args[1], file: c.file, line: d.Line}
+			nc := c
+			nc.m = ma
+			l.walkBlock(payload, d.Block, nc, cfg, visited, digests)
+			c.vars.add(ma.definition(c))
 
 		case d.Directive == "http" && d.IsBlock():
 			nc := c
@@ -311,8 +363,30 @@ func (l *Loader) walkBlock(
 				c.loc.TargetLine = d.Line
 			}
 
-		case d.Directive == "set" && c.loc != nil && len(d.Args) > 0:
-			c.loc.SetVars = append(c.loc.SetVars, strings.Join(d.Args, " "))
+		case d.Directive == "set" && len(d.Args) > 0:
+			if c.loc != nil {
+				c.loc.SetVars = append(c.loc.SetVars, strings.Join(d.Args, " "))
+			}
+			// Every set assigns a variable; a static literal becomes
+			// resolvable, a computed value still registers so it
+			// shadows any outer static definition.
+			if name := d.Args[0]; strings.HasPrefix(name, "$") && len(d.Args) >= 2 {
+				value := strings.Join(d.Args[1:], " ")
+				vd := varDef{
+					name:  name,
+					file:  c.file,
+					line:  d.Line,
+					depth: c.scopeDepth(),
+					from:  "set",
+				}
+				if c.loc != nil {
+					vd.owner = routeOwner(c.loc)
+				}
+				if !strings.Contains(value, "$") {
+					vd.value, vd.static = trimQuotes(value), true
+				}
+				c.vars.add(vd)
+			}
 
 		case d.IsBlock() && (c.loc != nil || c.srv != nil):
 			// Unknown nested blocks (if, limit_except, ...) inside a

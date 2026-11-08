@@ -96,9 +96,26 @@ server {
 		t.Errorf("/web/ lines = %d/%d, want both > 0", web.Line, web.TargetLine)
 	}
 
+	// The location sets the variable to a static literal itself, so
+	// the target resolves to that value with its defining file:line.
 	trap := byLoc["/var/"]
-	if trap.Target == nil || trap.Target.Kind != TargetUnresolved {
-		t.Fatalf("/var/ target = %+v, want unresolved", trap.Target)
+	if trap.Target == nil || trap.Target.Kind != TargetLocal {
+		t.Fatalf("/var/ target = %+v, want local (static set resolved)", trap.Target)
+	}
+	if trap.Target.Host != "127.0.0.1" || trap.Target.Port != 8082 {
+		t.Errorf("/var/ target host:port = %s:%d, want 127.0.0.1:8082",
+			trap.Target.Host, trap.Target.Port)
+	}
+	if trap.Target.Raw != "http://$lab_backend/" {
+		t.Errorf("/var/ target raw = %q, want the configured value", trap.Target.Raw)
+	}
+	if len(trap.Resolved) != 1 || trap.Resolved[0].Name != "$lab_backend" ||
+		trap.Resolved[0].Value != "127.0.0.1:8082" || trap.Resolved[0].From != "set" ||
+		trap.Resolved[0].Line <= 0 {
+		t.Errorf("/var/ resolved = %+v, want one static $lab_backend set with file:line", trap.Resolved)
+	}
+	if !strings.HasSuffix(trap.Resolved[0].File, "lab.conf") {
+		t.Errorf("/var/ resolved file = %q, want lab.conf", trap.Resolved[0].File)
 	}
 	if len(trap.SetVars) != 1 || !strings.Contains(trap.SetVars[0], "$lab_backend") {
 		t.Errorf("/var/ set vars = %v, want one $lab_backend assignment", trap.SetVars)
@@ -111,6 +128,141 @@ server {
 	// listen/server_name after the location must still be collected.
 	if got, want := strings.Join(static.Listen, " "), "80 default_server"; got != want {
 		t.Errorf("/ listen = %q, want %q", got, want)
+	}
+}
+
+// Static variable resolution: a target containing $refs is rewritten
+// only when the config itself proves every value — a static set or a
+// single-literal map with a default — and every other case (runtime
+// vars, dynamic or ambiguous or incomplete definitions) keeps the
+// unresolved target the collector reports as a blind spot.
+func TestLoadResolvesStaticVariables(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"nginx.conf": `
+events { worker_connections 1024; }
+http {
+    set $global_backend 127.0.0.1:8090;
+    set $ambig one;
+    set $ambig two;
+    map $http_x_single $map_single {
+        default pool_one;
+    }
+    map $http_x_multi $map_multi {
+        default pool_a;
+        host1 pool_b;
+    }
+    map $http_x_nodef $map_nodefault {
+        host1 pool_a;
+    }
+    map $http_x_incl $map_included {
+        include maps/extra.map;
+        default pool_a;
+    }
+    include conf.d/*.conf;
+}
+`,
+		"maps/extra.map": "host2 pool_b;\n",
+		"conf.d/lab.conf": `
+server {
+    listen 8080;
+    server_name _;
+    location /global/ { proxy_pass http://$global_backend/; }
+    location /braced/ { proxy_pass http://${global_backend}/; }
+    location /quoted/ {
+        set $quoted "127.0.0.1:8099";
+        proxy_pass http://$quoted/;
+    }
+    location /map/ { proxy_pass http://$map_single/; }
+    location /multi/ { proxy_pass http://$map_multi/; }
+    location /nodef/ { proxy_pass http://$map_nodefault/; }
+    location /incl/ { proxy_pass http://$map_included/; }
+    location /ambig/ { proxy_pass http://$ambig/; }
+    location /runtime/ { proxy_pass http://$http_backend/; }
+    location /outer/ {
+        set $global_backend http://$other;
+        proxy_pass http://$global_backend/;
+    }
+}
+`,
+	})
+
+	cfg, err := NewLoader().Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", cfg.Errors)
+	}
+	byLoc := map[string]Route{}
+	for _, r := range cfg.Routes {
+		byLoc[r.Location] = r
+	}
+
+	// Resolvable: static set across files, braced form, quoted set,
+	// and a single-literal map with a default.
+	resolved := map[string]TargetKind{
+		"/global/": TargetLocal,
+		"/braced/": TargetLocal,
+		"/quoted/": TargetLocal,
+		"/map/":    TargetHost,
+	}
+	for loc, want := range resolved {
+		r, ok := byLoc[loc]
+		if !ok {
+			t.Fatalf("route %s missing", loc)
+		}
+		if r.Target == nil || r.Target.Kind != want {
+			t.Errorf("%s target = %+v, want kind %s", loc, r.Target, want)
+			continue
+		}
+		if len(r.Resolved) == 0 {
+			t.Errorf("%s must cite its variable provenance", loc)
+		}
+		if r.Resolved[0].Line <= 0 || r.Resolved[0].File == "" {
+			t.Errorf("%s provenance = %+v, want file:line", loc, r.Resolved[0])
+		}
+		if !strings.Contains(r.Target.Raw, "$") {
+			t.Errorf("%s raw = %q, want the configured value with $ preserved", loc, r.Target.Raw)
+		}
+	}
+	if g := byLoc["/global/"]; g.Target.Port != 8090 {
+		t.Errorf("/global/ port = %d, want 8090", g.Target.Port)
+	}
+	if q := byLoc["/quoted/"]; q.Target.Port != 8099 {
+		t.Errorf("/quoted/ port = %d, want 8099 (quotes stripped)", q.Target.Port)
+	}
+	if m := byLoc["/map/"]; m.Target.Host != "pool_one" {
+		t.Errorf("/map/ host = %q, want pool_one", m.Target.Host)
+	}
+	if m := byLoc["/map/"]; m.Resolved[0].From != "map" {
+		t.Errorf("/map/ provenance from = %q, want map", m.Resolved[0].From)
+	}
+
+	// Unrefusable cases: differing map results, no default, an include
+	// whose entries were not read, two conflicting http-level sets, an
+	// unknown runtime variable, and an inner dynamic set shadowing an
+	// outer static one.
+	for _, loc := range []string{
+		"/multi/", "/nodef/", "/incl/", "/ambig/", "/runtime/", "/outer/",
+	} {
+		r, ok := byLoc[loc]
+		if !ok {
+			t.Fatalf("route %s missing", loc)
+		}
+		if r.Target == nil || r.Target.Kind != TargetUnresolved {
+			t.Errorf("%s target = %+v, want unresolved (never guess)", loc, r.Target)
+			continue
+		}
+		if len(r.Resolved) != 0 {
+			t.Errorf("%s resolved = %+v, want none", loc, r.Resolved)
+		}
+	}
+
+	// The shadowing route proves resolution is scope-aware: its own
+	// dynamic set shadows the http-level static one, while /global/
+	// in the same file still resolves through the outer definition.
+	if g := byLoc["/global/"]; len(g.Resolved) != 1 || g.Resolved[0].File == "" {
+		t.Errorf("/global/ must resolve via the http-level set, got %+v", g.Resolved)
 	}
 }
 
