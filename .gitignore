@@ -9,6 +9,7 @@ scripts/bin/harness.exe
 *.db
 *.db-wal
 *.db-shm
+cleanup-plans/
 lab/.vagrant/
 lab/.multipass/
 out/
