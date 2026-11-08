@@ -42,7 +42,8 @@ func TestDefaultLoadsEmbedded(t *testing.T) {
 		t.Errorf("ratios = %v/%v", r.Coverage.HighRatio, r.Coverage.MediumRatio)
 	}
 	want := map[string]bool{"listener": true, "systemd_unit": true, "container": true,
-		"cron_job": true, "script": true, "nginx_route": true, "nginx_upstream": true}
+		"cron_job": true, "script": true, "nginx_route": true, "nginx_upstream": true,
+		"caddy_route": true}
 	for kind := range want {
 		if _, ok := r.Coverage.Channels[kind]; !ok {
 			t.Errorf("coverage.channels missing %q", kind)

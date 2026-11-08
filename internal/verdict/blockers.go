@@ -63,12 +63,17 @@ func blockerB1(in Input) []Item {
 		if p.NodeIDs[far] == in.EntityID {
 			continue
 		}
-		if p.NodeKinds[far] != "nginx_route" && p.NodeKinds[far] != "nginx_upstream" {
+		farKind := p.NodeKinds[far]
+		if farKind != "nginx_route" && farKind != "nginx_upstream" && farKind != "caddy_route" {
 			continue
+		}
+		label := "nginx route/upstream"
+		if farKind == "caddy_route" {
+			label = "caddy route"
 		}
 		out = append(out, Item{
 			Code:       "B1",
-			Text:       fmt.Sprintf("nginx route/upstream %q is proxying to this entity", p.NodeNames[far]),
+			Text:       fmt.Sprintf("%s %q is proxying to this entity", label, p.NodeNames[far]),
 			EvidenceID: p.EvidenceID,
 			RawRef:     p.RawRef,
 		})

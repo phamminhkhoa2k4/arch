@@ -491,7 +491,7 @@ func (s *Store) scanHasKind(ctx context.Context, scanID int64, kinds []string) (
 // pathGates is the per-scan presence check for optional path shapes:
 // a walk over a kind no entity has can never produce a blocker.
 type pathGates struct {
-	nginx    bool
+	proxy    bool
 	compose  bool
 	listener bool
 }
@@ -499,7 +499,7 @@ type pathGates struct {
 func (s *Store) pathGates(ctx context.Context, scanID int64) (pathGates, error) {
 	var g pathGates
 	var err error
-	if g.nginx, err = s.scanHasKind(ctx, scanID, []string{"nginx_route", "nginx_upstream"}); err != nil {
+	if g.proxy, err = s.scanHasKind(ctx, scanID, []string{"nginx_route", "nginx_upstream", "caddy_route"}); err != nil {
 		return g, fmt.Errorf("build input: chain: %w", err)
 	}
 	if g.compose, err = s.scanHasKind(ctx, scanID, []string{"compose_service"}); err != nil {
@@ -528,7 +528,7 @@ func (s *Store) inputPathsWithGates(ctx context.Context, scanID, entityID int64,
 		on    bool
 	}
 	walks := []walk{
-		{[]string{"proxies_to", "listens_on"}, 4, gates.nginx},
+		{[]string{"proxies_to", "listens_on"}, 4, gates.proxy},
 		{[]string{"belongs_to", "depends_on"}, 4, gates.compose},
 		{[]string{"listens_on", "manages"}, 3, gates.listener},
 	}

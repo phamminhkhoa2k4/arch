@@ -62,6 +62,14 @@ var blindRemedies = map[string]blindRemedy{
 		"fix the nginx config syntax or grant read access to it, then rescan"},
 	"nginx_target_unresolved": {remedyResolve,
 		"static set/map values resolve automatically; for a runtime-defined variable run nginx -T to read the effective config, then re-check by hand and rescan"},
+	"caddy_config_unreadable": {remedyPermission,
+		"grant read access to the Caddyfile (usually /etc/caddy/Caddyfile) or run as root, then rescan"},
+	"caddy_config_parse_error": {remedyResolve,
+		"fix the Caddyfile syntax, then rescan"},
+	"caddy_import_unreadable": {remedyPermission,
+		"restore the imported file or grant read access to it, then rescan"},
+	"caddy_target_unresolved": {remedyResolve,
+		"replace the placeholder or environment reference with a concrete upstream, then rescan"},
 
 	// Source limitations: no action can widen the view.
 	"log_driver_unsupported": {remedyLimitation,
