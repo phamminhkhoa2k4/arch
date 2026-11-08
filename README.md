@@ -448,9 +448,38 @@ cleanup scripts. Those actions remain yours.
 | systemd journal | journal access | no journal-based evidence |
 | git repositories | read repository files | no repository/CI correlation |
 
+With `--db`, `doctor` additionally reads the database header to report its
+schema version and checks that the database file is owner-only:
+
+```sh
+./archaeologist doctor --db scan.db
+```
+
 Blind spots are first-class output: they appear in text, JSON, reports, and the
 dashboard. `UNKNOWN` is not an error to ignore; it is a request for more access
 or observation.
+
+### Protecting the scan database and plan directory
+
+The database and the generated plans are the sensitive outputs of a scan — they
+describe what runs on the host. The tool protects them, but they are yours to
+guard as well:
+
+- The SQLite database is created and re-tightened to mode `0600` every time it
+  is opened, including its `-wal`/`-shm` sidecars. Run
+  `doctor --db scan.db` to verify: it reports the schema version and warns when
+  the file is readable by other accounts.
+- Credential material is masked on its way into the database: JWTs, AWS, GCP
+  and Azure key shapes, connection-string passwords, private key blocks, and
+  tokens carried in URLs or headers are replaced before any collector can
+  persist them. This is defense in depth, not a license to share the file.
+- Plan directories (`cleanup-plans/` by default) contain the same evidence in
+  plain text. Keep them out of version control (the repository ignores
+  `cleanup-plans/` and `*.db`) and restrict them with
+  `chmod -R go-rwx cleanup-plans/` if they live outside your home directory.
+- This build does not encrypt the database at rest. On a multi-user host, run
+  scans as a dedicated unprivileged user or keep `--db` on an encrypted
+  filesystem, and delete the database when it is no longer needed.
 
 ## Maintenance
 
