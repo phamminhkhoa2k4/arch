@@ -61,7 +61,7 @@ var blindRemedies = map[string]blindRemedy{
 	"nginx_config_parse_error": {remedyResolve,
 		"fix the nginx config syntax or grant read access to it, then rescan"},
 	"nginx_target_unresolved": {remedyResolve,
-		"resolve the nginx variable: run nginx -T and provide the upstream or map value, then rescan"},
+		"static set/map values resolve automatically; for a runtime-defined variable run nginx -T to read the effective config, then re-check by hand and rescan"},
 
 	// Source limitations: no action can widen the view.
 	"log_driver_unsupported": {remedyLimitation,
