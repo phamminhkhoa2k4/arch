@@ -187,6 +187,7 @@ server {
         set $lab_backend 127.0.0.1:8082;
         proxy_pass http://$lab_backend/;
     }
+    location /trap/ { proxy_pass http://$nowhere_backend/; }
 }
 `,
 		"conf.d/site.conf": `
@@ -206,13 +207,14 @@ server {
 		{IdentityKey: listenerKey("tcp", "0.0.0.0", 8080, 99), Name: "0.0.0.0:8080"},
 		{IdentityKey: listenerKey("tcp", "0.0.0.0", 8081, 100), Name: "0.0.0.0:8081"},
 		{IdentityKey: listenerKey("tcp6", "::", 8081, 101), Name: "[::]:8081"},
+		{IdentityKey: listenerKey("tcp", "0.0.0.0", 8082, 104), Name: "0.0.0.0:8082"},
 		{IdentityKey: listenerKey("tcp", "127.0.0.1", 9001, 102), Name: "127.0.0.1:9001"},
 		{IdentityKey: listenerKey("tcp", "127.0.0.1", 9002, 103), Name: "127.0.0.1:9002"},
 	}}
 	sink := collect(t, root, index)
 
-	if got := countKind(sink, "nginx_route"); got != 6 {
-		t.Errorf("nginx_route count = %d, want 6", got)
+	if got := countKind(sink, "nginx_route"); got != 7 {
+		t.Errorf("nginx_route count = %d, want 7", got)
 	}
 	if got := countKind(sink, "nginx_upstream"); got != 1 {
 		t.Errorf("nginx_upstream count = %d, want 1", got)
@@ -242,19 +244,42 @@ server {
 		t.Errorf("/local/ edges = %+v, want one to the 8080 listener", localEdges)
 	}
 
-	// /var/ is a blind spot: the variable decides the target.
-	trap := routeByName(t, sink, "/var/")
+	// /var/ resolves through the location's own static set: local
+	// target, an edge to the matching listener graded strong
+	// heuristic, and evidence citing the defining line.
+	res := routeByName(t, sink, "/var/")
+	if res.Attributes["target_kind"] != "local" || res.Attributes["target_port"] != "8082" {
+		t.Errorf("/var/ attrs target = %s/%s, want local/8082",
+			res.Attributes["target_kind"], res.Attributes["target_port"])
+	}
+	if !strings.Contains(res.Attributes["resolved_from"], "lab.conf:") {
+		t.Errorf("/var/ resolved_from = %q, want the defining file:line", res.Attributes["resolved_from"])
+	}
+	varEdges := edgesFrom(sink, res.IdentityKey)
+	if len(varEdges) != 1 || varEdges[0].DstIdentityKey != listenerKey("tcp", "0.0.0.0", 8082, 104) {
+		t.Errorf("/var/ edges = %+v, want one to the 8082 listener", varEdges)
+	}
+	if varEdges[0].Strength != collector.StrengthStrongHeuristic {
+		t.Errorf("/var/ edge strength = %q, want strong_heuristic", varEdges[0].Strength)
+	}
+	if !strings.Contains(evidenceFor(t, sink, res.IdentityKey).Value["resolved_from"], "lab.conf:") {
+		t.Errorf("/var/ evidence must cite the resolution source: %+v",
+			evidenceFor(t, sink, res.IdentityKey).Value)
+	}
+	if !strings.Contains(res.Attributes["set_directives"], "$lab_backend") {
+		t.Errorf("set_directives = %q, want the $lab_backend assignment", res.Attributes["set_directives"])
+	}
+
+	// /trap/ keeps the blind spot: no definition exists, no guess.
+	trap := routeByName(t, sink, "/trap/")
 	if len(edgesFrom(sink, trap.IdentityKey)) != 0 {
-		t.Error("/var/ must not have edges")
+		t.Error("/trap/ must not have edges")
 	}
 	if len(sink.blinds) != 1 || sink.blinds[0].Reason != "nginx_target_unresolved" {
 		t.Fatalf("blinds = %+v, want one nginx_target_unresolved", sink.blinds)
 	}
 	if sink.blinds[0].EntityIdentityKey != trap.IdentityKey {
 		t.Errorf("blind spot entity = %q, want %q", sink.blinds[0].EntityIdentityKey, trap.IdentityKey)
-	}
-	if !strings.Contains(trap.Attributes["set_directives"], "$lab_backend") {
-		t.Errorf("set_directives = %q, want the $lab_backend assignment", trap.Attributes["set_directives"])
 	}
 
 	// /api/ chains to the upstream entity.
@@ -368,6 +393,47 @@ http {
 	}
 }
 
+// A resolved variable target participates fully in matching: with no
+// listener behind it the route is reported broken, and the evidence
+// behind the claim stays graded as the strong heuristic it is.
+func TestCollectResolvedRouteBrokenFinding(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"nginx.conf": `
+http {
+    server {
+        listen 80;
+        location /var-dead/ {
+            set $dead_backend 127.0.0.1:9998;
+            proxy_pass http://$dead_backend/;
+        }
+    }
+}
+`,
+	})
+	index := &fakeIndex{rows: []collector.ListenerRow{
+		{IdentityKey: listenerKey("tcp", "0.0.0.0", 8080, 1), Name: "0.0.0.0:8080"},
+	}}
+	sink := collect(t, root, index)
+
+	r := routeByName(t, sink, "/var-dead/")
+	if len(edgesFrom(sink, r.IdentityKey)) != 0 {
+		t.Error("no listener behind the resolved target: no edges")
+	}
+	if !hasFinding(sink, r.IdentityKey, "BROKEN_ROUTE") {
+		t.Fatalf("findings = %+v, want BROKEN_ROUTE for tcp/9998", sink.findings)
+	}
+	ev := evidenceFor(t, sink, r.IdentityKey)
+	if ev.Strength != collector.StrengthStrongHeuristic {
+		t.Errorf("resolved evidence strength = %q, want strong_heuristic", ev.Strength)
+	}
+	if ev.Value["resolved_from"] == "" || ev.Value["resolved_vars"] != "$dead_backend=127.0.0.1:9998" {
+		t.Errorf("resolved evidence value = %v, want provenance and substitution", ev.Value)
+	}
+	if ev.Value["target"] != "http://$dead_backend/" {
+		t.Errorf("evidence target = %q, want the configured value", ev.Value["target"])
+	}
+}
+
 func TestCollectWithoutIndexSkipsAbsenceClaims(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"nginx.conf": `
@@ -465,6 +531,18 @@ func hasFinding(sink *recSink, entityKey, kind string) bool {
 		}
 	}
 	return false
+}
+
+// evidenceFor finds the single evidence row of one entity.
+func evidenceFor(t *testing.T, sink *recSink, entityKey string) collector.Evidence {
+	t.Helper()
+	for _, e := range sink.evidence {
+		if e.EntityIdentityKey == entityKey {
+			return e
+		}
+	}
+	t.Fatalf("no evidence for %q", entityKey)
+	return collector.Evidence{}
 }
 
 // compile-time interface checks

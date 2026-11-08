@@ -195,11 +195,19 @@ func (c *Collector) collectRoute(
 		evValue["target"] = r.Target.Raw
 		evValue["target_kind"] = string(r.Target.Kind)
 	}
+	// A target proved by static variable substitution is a strong
+	// heuristic — the config is evidence, not a runtime observation.
+	strength := collector.StrengthDeterministic
+	if len(r.Resolved) > 0 {
+		strength = collector.StrengthStrongHeuristic
+		evValue["resolved_from"] = nginx.Provenance(r.Resolved)
+		evValue["resolved_vars"] = nginx.RenderedVars(r.Resolved)
+	}
 	if err := emit(collector.Evidence{
 		EntityIdentityKey: key,
 		Polarity:          collector.PolarityNeutral,
 		Channel:           "nginx",
-		Strength:          collector.StrengthDeterministic,
+		Strength:          strength,
 		ObservedAt:        nowRFC3339(),
 		RawRef:            r.RawRef(),
 		Ref:               ref,
@@ -278,7 +286,7 @@ func (c *Collector) collectRoute(
 				SrcIdentityKey: key,
 				DstIdentityKey: lk,
 				Kind:           "proxies_to",
-				Strength:       collector.StrengthDeterministic,
+				Strength:       strength,
 				EvidenceRef:    ref,
 			}); err != nil {
 				return err
@@ -297,7 +305,7 @@ func (c *Collector) collectRoute(
 			SrcIdentityKey: key,
 			DstIdentityKey: u.Key(),
 			Kind:           "proxies_to",
-			Strength:       collector.StrengthDeterministic,
+			Strength:       strength,
 			EvidenceRef:    ref,
 		})
 	}
@@ -336,6 +344,12 @@ func routeAttrs(r *nginx.Route) map[string]string {
 		"file":     r.File,
 		"line":     strconv.Itoa(r.Line),
 		"location": r.Location,
+	}
+	if len(r.Resolved) > 0 {
+		// The target came from static variable substitution; cite the
+		// definitions that proved it.
+		attrs["resolved_from"] = nginx.Provenance(r.Resolved)
+		attrs["resolved_vars"] = nginx.RenderedVars(r.Resolved)
 	}
 	if len(r.Listen) > 0 {
 		attrs["listen"] = strings.Join(r.Listen, ", ")
