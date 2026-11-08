@@ -443,6 +443,7 @@ cleanup scripts. Those actions remain yours.
 | systemd files | read unit files | no ExecStart/script discovery |
 | Docker (`/var/run/docker.sock`) | docker group or root | no containers/images |
 | nginx configs | read `/etc/nginx` | no route inventory |
+| Caddy configs | read `/etc/caddy/Caddyfile` | no route inventory |
 | cron files | read `/etc/crontab` and `/etc/cron.d` | no cron inventory |
 | access logs | group `adm` or root | no request-based activity evidence |
 | systemd journal | journal access | no journal-based evidence |
@@ -509,7 +510,7 @@ GoReleaser produces the linux archives and `checksums.txt`.
 cmd/archaeologist/   CLI entrypoint
 cmd/bench/           golden-fixture benchmark
 internal/cli/        commands and output formatting
-internal/collector/  process, systemd, Docker, nginx, cron, git collectors
+internal/collector/  process, systemd, Docker, nginx, caddy, cron, git collectors
 internal/store/      SQLite schema, evidence, graph, verdict persistence
 internal/verdict/    deterministic rule engine
 internal/rules/      embedded rules and overrides
