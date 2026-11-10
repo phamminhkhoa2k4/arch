@@ -446,6 +446,7 @@ cleanup scripts. Those actions remain yours.
 | Caddy configs | read `/etc/caddy/Caddyfile` | no route inventory |
 | HAProxy configs | read `/etc/haproxy/haproxy.cfg` | no route inventory |
 | Traefik configs | read `/etc/traefik/traefik.yml` | TOML and label/API providers not inventoried |
+| Apache configs | read `/etc/apache2/apache2.conf` | no route inventory |
 | cron files | read `/etc/crontab` and `/etc/cron.d` | no cron inventory |
 | access logs | group `adm` or root | no request-based activity evidence |
 | systemd journal | journal access | no journal-based evidence |
@@ -512,7 +513,7 @@ GoReleaser produces the linux archives and `checksums.txt`.
 cmd/archaeologist/   CLI entrypoint
 cmd/bench/           golden-fixture benchmark
 internal/cli/        commands and output formatting
-internal/collector/  process, systemd, Docker, nginx, caddy, haproxy, traefik, cron, git collectors
+internal/collector/  process, systemd, Docker, nginx, caddy, haproxy, traefik, apache, cron, git collectors
 internal/store/      SQLite schema, evidence, graph, verdict persistence
 internal/verdict/    deterministic rule engine
 internal/rules/      embedded rules and overrides
