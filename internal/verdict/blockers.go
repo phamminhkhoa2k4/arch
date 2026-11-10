@@ -67,7 +67,7 @@ func blockerB1(in Input) []Item {
 		if farKind != "nginx_route" && farKind != "nginx_upstream" &&
 			farKind != "caddy_route" && farKind != "haproxy_frontend" &&
 			farKind != "haproxy_backend" && farKind != "traefik_router" &&
-			farKind != "traefik_service" {
+			farKind != "traefik_service" && farKind != "apache_route" {
 			continue
 		}
 		label := "nginx route/upstream"
@@ -82,6 +82,8 @@ func blockerB1(in Input) []Item {
 			label = "traefik router"
 		case "traefik_service":
 			label = "traefik service"
+		case "apache_route":
+			label = "apache route"
 		}
 		out = append(out, Item{
 			Code:       "B1",

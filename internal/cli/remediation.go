@@ -86,6 +86,14 @@ var blindRemedies = map[string]blindRemedy{
 		"no action: routing from this provider (labels or API) is not read from files; rely on other channels or expose it through the file provider"},
 	"traefik_target_unresolved": {remedyResolve,
 		"replace the placeholder with a concrete server URL, then rescan"},
+	"apache_config_unreadable": {remedyPermission,
+		"grant read access to the Apache config (usually /etc/apache2/apache2.conf) or run as root, then rescan"},
+	"apache_config_parse_error": {remedyResolve,
+		"fix the Apache config syntax at the reported position, then rescan"},
+	"apache_include_unreadable": {remedyPermission,
+		"grant read access to the included Apache config file or run as root, then rescan"},
+	"apache_target_unresolved": {remedyResolve,
+		"replace the placeholder with a concrete backend address, then rescan"},
 
 	// Source limitations: no action can widen the view.
 	"log_driver_unsupported": {remedyLimitation,

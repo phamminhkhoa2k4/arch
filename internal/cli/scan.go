@@ -13,6 +13,7 @@ import (
 
 	"archaeologist/internal/collector"
 	acoll "archaeologist/internal/collector/accesslog"
+	apcoll "archaeologist/internal/collector/apache"
 	cdcoll "archaeologist/internal/collector/caddy"
 	ccoll "archaeologist/internal/collector/cron"
 	dcoll "archaeologist/internal/collector/docker"
@@ -104,6 +105,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 		mcoll.Index
 		gcoll.Index
 		tcoll.Index
+		apcoll.Index
 	}
 	newCollectors := func(index scanIndex) []collector.Collector {
 		var sIdx sysd.ProcessIndex
@@ -115,6 +117,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 		var mIdx mcoll.Index
 		var gIdx gcoll.Index
 		var tIdx tcoll.Index
+		var apIdx apcoll.Index
 		if index != nil {
 			sIdx = index
 			dIdx = index
@@ -125,6 +128,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			mIdx = index
 			gIdx = index
 			tIdx = index
+			apIdx = index
 		}
 		cc := ccoll.New(systemd.OSFS{}, cIdx)
 		cc.SetLastRun(ccoll.NewExecLastRun())
@@ -138,6 +142,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			cdcoll.New(nil, cdIdx),
 			hcoll.New(hIdx),
 			tcoll.New(tIdx),
+			apcoll.New(apIdx),
 			cc,
 			mcoll.New(mIdx),
 			gcoll.New(gIdx),

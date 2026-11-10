@@ -34,6 +34,7 @@ coverage:
     haproxy_backend: [haproxy]
     traefik_router: [traefik]
     traefik_service: [traefik]
+    apache_route: [apache]
     image: [docker]
     volume: [docker]
     network: [docker]
