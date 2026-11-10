@@ -22,6 +22,8 @@ func TestRemedyForKnownReasons(t *testing.T) {
 		{"cron_source_unreadable", remedyPermission, "root"},
 		{"docker_log_unreadable", remedyPermission, "docker"},
 		{"nginx_target_unresolved", remedyResolve, "nginx -T"},
+		{"haproxy_config_unreadable", remedyPermission, "haproxy.cfg"},
+		{"haproxy_target_unresolved", remedyResolve, "server address"},
 		{"cron_env_unresolved", remedyResolve, "/etc/environment"},
 		{"log_retention_short", remedyLimitation, "no action"},
 		{"cron_schedule_unparsed", remedyManual, "manually"},

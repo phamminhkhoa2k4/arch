@@ -499,7 +499,8 @@ type pathGates struct {
 func (s *Store) pathGates(ctx context.Context, scanID int64) (pathGates, error) {
 	var g pathGates
 	var err error
-	if g.proxy, err = s.scanHasKind(ctx, scanID, []string{"nginx_route", "nginx_upstream", "caddy_route"}); err != nil {
+	if g.proxy, err = s.scanHasKind(ctx, scanID, []string{"nginx_route", "nginx_upstream", "caddy_route",
+		"haproxy_frontend", "haproxy_backend"}); err != nil {
 		return g, fmt.Errorf("build input: chain: %w", err)
 	}
 	if g.compose, err = s.scanHasKind(ctx, scanID, []string{"compose_service"}); err != nil {

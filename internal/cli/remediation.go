@@ -70,6 +70,12 @@ var blindRemedies = map[string]blindRemedy{
 		"restore the imported file or grant read access to it, then rescan"},
 	"caddy_target_unresolved": {remedyResolve,
 		"replace the placeholder or environment reference with a concrete upstream, then rescan"},
+	"haproxy_config_unreadable": {remedyPermission,
+		"grant read access to the HAProxy config (usually /etc/haproxy/haproxy.cfg) or run as root, then rescan"},
+	"haproxy_config_parse_error": {remedyResolve,
+		"fix the HAProxy config error (syntax or a directive without its arguments), then rescan"},
+	"haproxy_target_unresolved": {remedyResolve,
+		"replace the placeholder or environment reference with a concrete server address, then rescan"},
 
 	// Source limitations: no action can widen the view.
 	"log_driver_unsupported": {remedyLimitation,

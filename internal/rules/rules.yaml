@@ -30,6 +30,8 @@ coverage:
     nginx_route: [nginx, nginx_access_log]
     nginx_upstream: [nginx]
     caddy_route: [caddy]
+    haproxy_frontend: [haproxy]
+    haproxy_backend: [haproxy]
     image: [docker]
     volume: [docker]
     network: [docker]

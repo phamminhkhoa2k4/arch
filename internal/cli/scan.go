@@ -13,10 +13,11 @@ import (
 
 	"archaeologist/internal/collector"
 	acoll "archaeologist/internal/collector/accesslog"
-	ccoll "archaeologist/internal/collector/cron"
 	cdcoll "archaeologist/internal/collector/caddy"
+	ccoll "archaeologist/internal/collector/cron"
 	dcoll "archaeologist/internal/collector/docker"
 	gcoll "archaeologist/internal/collector/gitrepo"
+	hcoll "archaeologist/internal/collector/haproxy"
 	"archaeologist/internal/collector/listener"
 	mcoll "archaeologist/internal/collector/mtime"
 	ncoll "archaeologist/internal/collector/nginx"
@@ -98,6 +99,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 		ncoll.Index
 		ccoll.Index
 		cdcoll.Index
+		hcoll.Index
 		mcoll.Index
 		gcoll.Index
 	}
@@ -107,6 +109,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 		var nIdx ncoll.Index
 		var cIdx ccoll.Index
 		var cdIdx cdcoll.Index
+		var hIdx hcoll.Index
 		var mIdx mcoll.Index
 		var gIdx gcoll.Index
 		if index != nil {
@@ -115,6 +118,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			nIdx = index
 			cIdx = index
 			cdIdx = index
+			hIdx = index
 			mIdx = index
 			gIdx = index
 		}
@@ -128,6 +132,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			ncoll.New(nginx.NewLoader(), nIdx),
 			acoll.New(nginx.NewLoader(), nil),
 			cdcoll.New(nil, cdIdx),
+			hcoll.New(hIdx),
 			cc,
 			mcoll.New(mIdx),
 			gcoll.New(gIdx),
