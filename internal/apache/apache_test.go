@@ -12,6 +12,16 @@ import (
 func writeTree(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
+	writeFilesAt(t, dir, files)
+	return filepath.Join(dir, "apache2.conf")
+}
+
+// writeFilesAt writes a name→content map under dir, creating parent
+// directories as needed. Tests that embed the directory into the
+// config text (ServerRoot, absolute includes) use it directly so the
+// tree never points at the host's own configuration.
+func writeFilesAt(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
 	for name, content := range files {
 		path := filepath.Join(dir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -21,7 +31,6 @@ func writeTree(t *testing.T, files map[string]string) string {
 			t.Fatal(err)
 		}
 	}
-	return filepath.Join(dir, "apache2.conf")
 }
 
 // routeByPath finds the single route matching a source path.
@@ -37,12 +46,16 @@ func routeByPath(t *testing.T, cfg *Config, path string) *Route {
 }
 
 func TestLoadExtractsRoutes(t *testing.T) {
-	root := writeTree(t, map[string]string{
+	// ServerRoot points at the fixture tree itself: the include then
+	// resolves against the temp dir, never against a real Apache
+	// installation that a CI runner may happen to have.
+	dir := t.TempDir()
+	writeFilesAt(t, dir, map[string]string{
 		"apache2.conf": `
-ServerRoot "/etc/apache2"   # ignored: the include resolves against the tree
+ServerRoot "` + dir + `"
 Listen 80
 
-# Relative include: falls back to the main configuration's directory.
+# Relative include: resolved against ServerRoot, like Apache does.
 IncludeOptional sites-enabled/*.conf
 
 <VirtualHost *:80>
@@ -64,6 +77,7 @@ ProxyPass /global http://127.0.0.1:9090
 </VirtualHost>
 `,
 	})
+	root := filepath.Join(dir, "apache2.conf")
 
 	cfg, err := Load(root)
 	if err != nil {
@@ -157,6 +171,45 @@ Include missing/*.conf
 	// The valid route still contributes inventory.
 	if len(cfg.Routes) != 1 || cfg.Routes[0].Path != "/ok" {
 		t.Errorf("routes = %+v, want the valid one kept", cfg.Routes)
+	}
+}
+
+// A relative include resolves against ServerRoot first, like Apache
+// does: when ServerRoot points at its own tree (as the fixed fixture
+// does), a host installation with the same relative layout must not
+// be pulled in. This pins the include-resolution order that made a
+// host-dependent fixture lose its own site on machines where
+// ServerRoot existed with matching files.
+func TestLoadIncludeResolvesAgainstServerRootFirst(t *testing.T) {
+	host := t.TempDir() // stands in for a system ServerRoot with a live site
+	writeFilesAt(t, host, map[string]string{
+		"sites-enabled/000-default.conf": "<VirtualHost *:80>\nDocumentRoot /var/www\n</VirtualHost>\n",
+	})
+	dir := t.TempDir()
+	writeFilesAt(t, dir, map[string]string{
+		"apache2.conf": `
+ServerRoot "` + host + `"
+IncludeOptional sites-enabled/*.conf
+ProxyPass /global http://127.0.0.1:9090
+`,
+		"sites-enabled/000-default.conf": `
+<VirtualHost *:443>
+    <Location /sock>
+        ProxyPass unix:/run/app.sock|http://localhost/sock
+    </Location>
+</VirtualHost>
+`,
+	})
+
+	cfg, err := Load(filepath.Join(dir, "apache2.conf"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Only /global: the include followed ServerRoot into the host
+	// tree, so the fixture's own site contributed nothing. A test
+	// that needs both must point ServerRoot at its own tree.
+	if len(cfg.Routes) != 1 || cfg.Routes[0].Path != "/global" {
+		t.Fatalf("routes = %+v, want only /global (ServerRoot tree wins)", cfg.Routes)
 	}
 }
 
