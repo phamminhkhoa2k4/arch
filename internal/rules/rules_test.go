@@ -43,7 +43,8 @@ func TestDefaultLoadsEmbedded(t *testing.T) {
 	}
 	want := map[string]bool{"listener": true, "systemd_unit": true, "container": true,
 		"cron_job": true, "script": true, "nginx_route": true, "nginx_upstream": true,
-		"caddy_route": true, "haproxy_frontend": true, "haproxy_backend": true}
+		"caddy_route": true, "haproxy_frontend": true, "haproxy_backend": true,
+		"traefik_router": true, "traefik_service": true}
 	for kind := range want {
 		if _, ok := r.Coverage.Channels[kind]; !ok {
 			t.Errorf("coverage.channels missing %q", kind)

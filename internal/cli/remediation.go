@@ -76,6 +76,16 @@ var blindRemedies = map[string]blindRemedy{
 		"fix the HAProxy config error (syntax or a directive without its arguments), then rescan"},
 	"haproxy_target_unresolved": {remedyResolve,
 		"replace the placeholder or environment reference with a concrete server address, then rescan"},
+	"traefik_config_unreadable": {remedyPermission,
+		"grant read access to the Traefik config (usually /etc/traefik/traefik.yml) or run as root, then rescan"},
+	"traefik_config_parse_error": {remedyResolve,
+		"fix the Traefik YAML syntax, then rescan"},
+	"traefik_config_unsupported": {remedyResolve,
+		"convert the TOML config to YAML (traefik.yml); Traefik accepts both formats, then rescan"},
+	"traefik_provider_unsupported": {remedyLimitation,
+		"no action: routing from this provider (labels or API) is not read from files; rely on other channels or expose it through the file provider"},
+	"traefik_target_unresolved": {remedyResolve,
+		"replace the placeholder with a concrete server URL, then rescan"},
 
 	// Source limitations: no action can widen the view.
 	"log_driver_unsupported": {remedyLimitation,

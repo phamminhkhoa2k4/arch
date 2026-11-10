@@ -32,6 +32,8 @@ coverage:
     caddy_route: [caddy]
     haproxy_frontend: [haproxy]
     haproxy_backend: [haproxy]
+    traefik_router: [traefik]
+    traefik_service: [traefik]
     image: [docker]
     volume: [docker]
     network: [docker]

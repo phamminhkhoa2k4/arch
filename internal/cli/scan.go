@@ -23,6 +23,7 @@ import (
 	ncoll "archaeologist/internal/collector/nginx"
 	"archaeologist/internal/collector/process"
 	sysd "archaeologist/internal/collector/systemd"
+	tcoll "archaeologist/internal/collector/traefik"
 	"archaeologist/internal/compose"
 	dengine "archaeologist/internal/docker"
 	"archaeologist/internal/nginx"
@@ -102,6 +103,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 		hcoll.Index
 		mcoll.Index
 		gcoll.Index
+		tcoll.Index
 	}
 	newCollectors := func(index scanIndex) []collector.Collector {
 		var sIdx sysd.ProcessIndex
@@ -112,6 +114,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 		var hIdx hcoll.Index
 		var mIdx mcoll.Index
 		var gIdx gcoll.Index
+		var tIdx tcoll.Index
 		if index != nil {
 			sIdx = index
 			dIdx = index
@@ -121,6 +124,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			hIdx = index
 			mIdx = index
 			gIdx = index
+			tIdx = index
 		}
 		cc := ccoll.New(systemd.OSFS{}, cIdx)
 		cc.SetLastRun(ccoll.NewExecLastRun())
@@ -133,6 +137,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			acoll.New(nginx.NewLoader(), nil),
 			cdcoll.New(nil, cdIdx),
 			hcoll.New(hIdx),
+			tcoll.New(tIdx),
 			cc,
 			mcoll.New(mIdx),
 			gcoll.New(gIdx),

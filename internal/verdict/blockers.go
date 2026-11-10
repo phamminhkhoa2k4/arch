@@ -66,7 +66,8 @@ func blockerB1(in Input) []Item {
 		farKind := p.NodeKinds[far]
 		if farKind != "nginx_route" && farKind != "nginx_upstream" &&
 			farKind != "caddy_route" && farKind != "haproxy_frontend" &&
-			farKind != "haproxy_backend" {
+			farKind != "haproxy_backend" && farKind != "traefik_router" &&
+			farKind != "traefik_service" {
 			continue
 		}
 		label := "nginx route/upstream"
@@ -77,6 +78,10 @@ func blockerB1(in Input) []Item {
 			label = "haproxy frontend"
 		case "haproxy_backend":
 			label = "haproxy backend"
+		case "traefik_router":
+			label = "traefik router"
+		case "traefik_service":
+			label = "traefik service"
 		}
 		out = append(out, Item{
 			Code:       "B1",
