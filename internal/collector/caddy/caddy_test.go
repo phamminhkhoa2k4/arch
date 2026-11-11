@@ -245,8 +245,13 @@ static.example.test {
 	if cdn.Attributes["targets"] != "https://cdn.example.net" {
 		t.Errorf("cdn targets = %q", cdn.Attributes["targets"])
 	}
-	if len(edgesFrom(sink, cdn.IdentityKey)) != 0 {
-		t.Error("external host must not produce an edge")
+	// The external destination becomes a shared graph entity.
+	cdnEdges := edgesFrom(sink, cdn.IdentityKey)
+	if len(cdnEdges) != 1 || cdnEdges[0].Kind != "proxies_to" {
+		t.Fatalf("cdn edges = %+v, want one proxies_to to the destination", cdnEdges)
+	}
+	if cdnEdges[0].DstIdentityKey != "external_host|cdn.example.net" {
+		t.Errorf("cdn dst = %q, want external_host|cdn.example.net", cdnEdges[0].DstIdentityKey)
 	}
 }
 

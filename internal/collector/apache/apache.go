@@ -15,6 +15,7 @@ import (
 	"archaeologist/internal/apache"
 	"archaeologist/internal/collector"
 	"archaeologist/internal/collector/listener"
+	"archaeologist/internal/collector/netdep"
 )
 
 // Index supplies the listener snapshot gathered by earlier collectors;
@@ -233,8 +234,18 @@ func (c *Collector) collectRoute(
 		}
 		return nil
 	default: // TargetHost
-		// External server: recorded as scope in attrs, no edge.
-		return nil
+		// Off-host destination: a shared entity keeps the dependency
+		// visible in the graph instead of a scope attribute.
+		return netdep.Promote(sink, netdep.Link{
+			FromKey:  key,
+			Ref:      ref,
+			Channel:  "apache",
+			Strength: collector.StrengthDeterministic,
+			RawRef:   r.RawRef(),
+			Target: netdep.Target{
+				Host: t.Host, Port: t.Port, Scheme: t.Scheme, Raw: t.Raw,
+			},
+		})
 	}
 }
 

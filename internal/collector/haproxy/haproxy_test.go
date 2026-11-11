@@ -233,10 +233,20 @@ listen stats
 	}
 
 	// Local servers edge to their listeners; the external backup
-	// server only shows up as scope, never as an edge.
+	// server becomes a shared destination entity.
 	beApp := entityByName(t, sink, "haproxy_backend", "be_app")
-	if got := len(edgesFrom(sink, beApp.IdentityKey)); got != 1 {
-		t.Errorf("be_app edges = %d, want 1 (local only)", got)
+	beAppEdges := edgesFrom(sink, beApp.IdentityKey)
+	if len(beAppEdges) != 2 {
+		t.Fatalf("be_app edges = %d, want 2 (local listener + external backup)", len(beAppEdges))
+	}
+	linked := false
+	for _, e := range beAppEdges {
+		if e.DstIdentityKey == "external_host|192.0.2.10:8080" {
+			linked = true
+		}
+	}
+	if !linked {
+		t.Errorf("be_app edges = %+v, want one to external_host|192.0.2.10:8080", beAppEdges)
 	}
 	beAPI := entityByName(t, sink, "haproxy_backend", "be_api")
 	if got := len(edgesFrom(sink, beAPI.IdentityKey)); got != 1 {
@@ -256,8 +266,8 @@ listen stats
 	}
 
 	// Every evidence row points back at its config line.
-	if len(sink.evidence) != 5 {
-		t.Errorf("evidence count = %d, want 5", len(sink.evidence))
+	if len(sink.evidence) != 6 {
+		t.Errorf("evidence count = %d, want 6", len(sink.evidence))
 	}
 	for _, ev := range sink.evidence {
 		if ev.Channel != "haproxy" || ev.RawRef == "" {

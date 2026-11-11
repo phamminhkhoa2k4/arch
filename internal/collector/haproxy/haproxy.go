@@ -14,6 +14,7 @@ import (
 
 	"archaeologist/internal/collector"
 	"archaeologist/internal/collector/listener"
+	"archaeologist/internal/collector/netdep"
 	"archaeologist/internal/haproxy"
 )
 
@@ -309,8 +310,18 @@ func (c *Collector) handleServer(
 		}
 		return nil
 	default: // TargetHost
-		// External server: recorded as scope in attrs, no edge.
-		return nil
+		// Off-host destination: a shared entity keeps the dependency
+		// visible in the graph instead of a scope attribute.
+		return netdep.Promote(sink, netdep.Link{
+			FromKey:  key,
+			Ref:      ref,
+			Channel:  "haproxy",
+			Strength: collector.StrengthDeterministic,
+			RawRef:   file + ":" + strconv.Itoa(s.Line),
+			Target: netdep.Target{
+				Host: t.Host, Port: t.Port, Raw: t.Raw,
+			},
+		})
 	}
 }
 

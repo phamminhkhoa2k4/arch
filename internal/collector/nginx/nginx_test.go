@@ -296,13 +296,21 @@ server {
 		t.Errorf("/api/ target_upstream = %q, want pool", api.Attributes["target_upstream"])
 	}
 
-	// External host: scope in attrs, nothing else claimed.
+	// External host: scope in attrs, plus a shared destination entity
+	// so the off-host dependency shows up in the graph.
 	ext := routeByName(t, sink, "/ext/")
 	if ext.Attributes["upstream_scope"] != "external" {
 		t.Errorf("/ext/ upstream_scope = %q, want external", ext.Attributes["upstream_scope"])
 	}
-	if len(edgesFrom(sink, ext.IdentityKey)) != 0 {
-		t.Error("/ext/ must not have edges")
+	extEdges := edgesFrom(sink, ext.IdentityKey)
+	if len(extEdges) != 1 || extEdges[0].Kind != "proxies_to" {
+		t.Fatalf("/ext/ edges = %+v, want one proxies_to to the destination", extEdges)
+	}
+	if extEdges[0].DstIdentityKey != "external_host|example.com:443" {
+		t.Errorf("/ext/ dst = %q, want external_host|example.com:443", extEdges[0].DstIdentityKey)
+	}
+	if _, ok := sink.entities["external_host|example.com:443"]; !ok {
+		t.Errorf("entities = %d, want external_host|example.com:443", len(sink.entities))
 	}
 
 	// Static location: entity only.

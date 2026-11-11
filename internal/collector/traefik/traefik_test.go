@@ -253,19 +253,29 @@ http:
 	if got := len(edgesFrom(sink, weighted.IdentityKey)); got != 1 {
 		t.Errorf("weighted-svc edges = %d, want 1 (to api-svc)", got)
 	}
-	// api-svc edges to its local listener; the external server only
-	// shows up as scope, never as an edge.
+	// api-svc edges to its local listener; the external server
+	// becomes a shared destination entity.
 	apiSvc := entityByName(t, sink, "traefik_service", "api-svc")
-	if got := len(edgesFrom(sink, apiSvc.IdentityKey)); got != 1 {
-		t.Errorf("api-svc edges = %d, want 1 (local only)", got)
+	apiSvcEdges := edgesFrom(sink, apiSvc.IdentityKey)
+	if len(apiSvcEdges) != 2 {
+		t.Fatalf("api-svc edges = %d, want 2 (local listener + external server)", len(apiSvcEdges))
+	}
+	linked := false
+	for _, e := range apiSvcEdges {
+		if e.DstIdentityKey == "external_host|192.0.2.10:8443" {
+			linked = true
+		}
+	}
+	if !linked {
+		t.Errorf("api-svc edges = %+v, want one to external_host|192.0.2.10:8443", apiSvcEdges)
 	}
 	if apiSvc.Attributes["servers"] == "" || !strings.Contains(apiSvc.Attributes["servers"], "192.0.2.10") {
 		t.Errorf("api-svc servers attr = %q", apiSvc.Attributes["servers"])
 	}
 
 	// Every evidence row points back at its config with the channel.
-	if len(sink.evidence) != 4 {
-		t.Errorf("evidence count = %d, want 4", len(sink.evidence))
+	if len(sink.evidence) != 5 {
+		t.Errorf("evidence count = %d, want 5", len(sink.evidence))
 	}
 	for _, ev := range sink.evidence {
 		if ev.Channel != "traefik" || ev.RawRef == "" {

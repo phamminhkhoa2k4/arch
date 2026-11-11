@@ -14,6 +14,7 @@ import (
 
 	"archaeologist/internal/collector"
 	"archaeologist/internal/collector/listener"
+	"archaeologist/internal/collector/netdep"
 	"archaeologist/internal/nginx"
 )
 
@@ -129,25 +130,47 @@ func (c *Collector) Collect(_ context.Context, sink collector.Sink) error {
 	}
 
 	// Every server of an upstream gets its own edge: a pool is only
-	// reachable through all of its members.
+	// reachable through all of its members. A member that points off
+	// this host becomes a shared destination entity instead.
 	for i := range cfg.Upstreams {
 		u := &cfg.Upstreams[i]
 		key := u.Key()
 		for _, s := range u.Servers {
 			t := nginx.ParseTarget(s)
-			if t.Kind != nginx.TargetLocal || t.Port == 0 {
-				continue // external member, or no static port to match
-			}
-			for _, lk := range byPort[portKey{"tcp", t.Port}] {
-				if err := sink.UpsertEdge(collector.Edge{
-					SrcIdentityKey: key,
-					DstIdentityKey: lk,
-					Kind:           "proxies_to",
-					Strength:       collector.StrengthDeterministic,
-					EvidenceRef:    "nginx-upstream:" + key,
+			switch t.Kind {
+			case nginx.TargetHost:
+				if upstreamNamed(cfg, t.Host) != nil {
+					continue // another declared pool, not an outside host
+				}
+				if err := netdep.Promote(sink, netdep.Link{
+					FromKey:  key,
+					Ref:      "nginx-upstream:" + key,
+					Channel:  "nginx",
+					Strength: collector.StrengthDeterministic,
+					RawRef:   u.RawRef(),
+					Target: netdep.Target{
+						Host: t.Host, Port: t.Port, Scheme: t.Scheme, Raw: t.Raw,
+					},
 				}); err != nil {
 					return err
 				}
+			case nginx.TargetLocal:
+				if t.Port == 0 {
+					continue // no static port to match
+				}
+				for _, lk := range byPort[portKey{"tcp", t.Port}] {
+					if err := sink.UpsertEdge(collector.Edge{
+						SrcIdentityKey: key,
+						DstIdentityKey: lk,
+						Kind:           "proxies_to",
+						Strength:       collector.StrengthDeterministic,
+						EvidenceRef:    "nginx-upstream:" + key,
+					}); err != nil {
+						return err
+					}
+				}
+			default:
+				continue // unix socket or runtime-defined member
 			}
 		}
 	}
@@ -297,9 +320,18 @@ func (c *Collector) collectRoute(
 	default: // nginx.TargetHost
 		u := upstreamNamed(cfg, t.Host)
 		if u == nil {
-			// An external host is known truth, not a gap: attrs
-			// record the scope, nothing else is claimed.
-			return nil
+			// An external host is known truth, not a gap: it becomes
+			// a shared destination entity the graph can follow.
+			return netdep.Promote(sink, netdep.Link{
+				FromKey:  key,
+				Ref:      ref,
+				Channel:  "nginx",
+				Strength: strength,
+				RawRef:   r.RawRef(),
+				Target: netdep.Target{
+					Host: t.Host, Port: t.Port, Scheme: t.Scheme, Raw: t.Raw,
+				},
+			})
 		}
 		return sink.UpsertEdge(collector.Edge{
 			SrcIdentityKey: key,

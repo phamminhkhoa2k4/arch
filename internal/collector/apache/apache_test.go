@@ -222,10 +222,14 @@ func TestCollectRoutesEdgesAndScope(t *testing.T) {
 		t.Errorf("api edges = %d, want 1", got)
 	}
 
-	// The external target only shows up as scope, never as an edge.
+	// The external target becomes a shared destination entity.
 	ext := entityByName(t, sink, "apache_route", "/ext")
-	if got := len(edgesFrom(sink, ext.IdentityKey)); got != 0 {
-		t.Errorf("ext edges = %d, want 0", got)
+	extEdges := edgesFrom(sink, ext.IdentityKey)
+	if len(extEdges) != 1 || extEdges[0].Kind != "proxies_to" {
+		t.Fatalf("ext edges = %+v, want one proxies_to to the destination", extEdges)
+	}
+	if extEdges[0].DstIdentityKey != "external_host|192.0.2.10:9443" {
+		t.Errorf("ext dst = %q, want external_host|192.0.2.10:9443", extEdges[0].DstIdentityKey)
 	}
 	if ext.Attributes["target"] != "https://192.0.2.10:9443" {
 		t.Errorf("ext target attr = %q", ext.Attributes["target"])
@@ -238,8 +242,8 @@ func TestCollectRoutesEdgesAndScope(t *testing.T) {
 	}
 
 	// Every evidence row points back at its config line.
-	if len(sink.evidence) != 3 {
-		t.Errorf("evidence count = %d, want 3", len(sink.evidence))
+	if len(sink.evidence) != 4 {
+		t.Errorf("evidence count = %d, want 4", len(sink.evidence))
 	}
 	for _, ev := range sink.evidence {
 		if ev.Channel != "apache" || ev.RawRef == "" {
