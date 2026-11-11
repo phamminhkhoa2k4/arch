@@ -39,6 +39,10 @@ var listKeys = map[string]bool{
 	"ExecStop": true, "ExecStopPost": true,
 	"ExecReload": true, "ExecCondition": true,
 	"OnCalendar": true, "OnBootSec": true, "OnUnitActiveSec": true,
+	// Socket directives accumulate across files: a drop-in adds its
+	// Listen* line instead of replacing the base file's addresses.
+	"ListenStream": true, "ListenDatagram": true, "ListenSequentially": true,
+	"ListenNetlink": true, "ListenMessageQueue": true, "ListenUSBFunction": true,
 }
 
 // ParseFile parses one unit file body. Full-line comments (#/;) and

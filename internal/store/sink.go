@@ -317,10 +317,11 @@ func (k *ScanSink) ListenerRows() ([]collector.ListenerRow, error) {
 }
 
 // UnitRows returns every systemd unit of this scan with its identity
-// key and name — the input for systemctl-reference matching (cron).
+// key, name and attributes — the input for systemctl-reference
+// matching (cron) and socket-activation correlation.
 func (k *ScanSink) UnitRows() ([]collector.UnitRow, error) {
 	rows, err := k.s.db.QueryContext(k.ctx,
-		`SELECT identity_key, name FROM entities
+		`SELECT identity_key, name, attributes_json FROM entities
 		 WHERE scan_id = ? AND kind = 'systemd_unit' ORDER BY identity_key`, k.scanID)
 	if err != nil {
 		return nil, fmt.Errorf("unit rows: %w", err)
@@ -329,11 +330,15 @@ func (k *ScanSink) UnitRows() ([]collector.UnitRow, error) {
 
 	var out []collector.UnitRow
 	for rows.Next() {
-		var key, name string
-		if err := rows.Scan(&key, &name); err != nil {
+		var key, name, attrsJSON string
+		if err := rows.Scan(&key, &name, &attrsJSON); err != nil {
 			return nil, fmt.Errorf("unit rows scan: %w", err)
 		}
-		out = append(out, collector.UnitRow{IdentityKey: key, Name: name})
+		var attrs map[string]string
+		if err := json.Unmarshal([]byte(attrsJSON), &attrs); err != nil {
+			continue // attributes produced elsewhere may not be a map
+		}
+		out = append(out, collector.UnitRow{IdentityKey: key, Name: name, Attributes: attrs})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("unit rows: %w", err)

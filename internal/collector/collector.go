@@ -90,10 +90,12 @@ type ListenerRow struct {
 }
 
 // UnitRow is one systemd unit recorded in the scan — the input for
-// resolving systemctl references found in cron scripts (cron).
+// resolving systemctl references found in cron scripts (cron) and for
+// socket-activation correlation (socket activation).
 type UnitRow struct {
 	IdentityKey string
-	Name        string // e.g. "lab-batch.service"
+	Name        string            // e.g. "lab-batch.service"
+	Attributes  map[string]string // fragment_path, active_state, ...
 }
 
 // ContainerRow is one container recorded in the scan — the input for
