@@ -34,8 +34,8 @@ a **blind spot**, never a guess.
 ## What it does
 
 - **Discovers** processes, listeners, systemd units, Docker and Compose
-  projects, nginx routes, cron jobs and timers, scripts, git repositories, and
-  CI metadata.
+  projects, Podman and containerd containers, nginx routes, cron jobs and
+  timers, scripts, git repositories, and CI metadata.
 - **Correlates** them into an evidence-backed dependency graph.
 - **Observes** network activity over time to distinguish “idle now” from
   “unused across a full observation window.”
@@ -442,6 +442,8 @@ cleanup scripts. Those actions remain yours.
 | systemd (D-Bus) | `/run/dbus/system_bus_socket` | no live unit inventory |
 | systemd files | read unit files | no ExecStart/script discovery |
 | Docker (`/var/run/docker.sock`) | docker group or root | no containers/images |
+| Podman (rootful/rootless socket) | podman group or root | no podman containers/images |
+| Containerd bundles (`/run/containerd`) | root or read access | containerd state reported as UNKNOWN |
 | nginx configs | read `/etc/nginx` | no route inventory |
 | Caddy configs | read `/etc/caddy/Caddyfile` | no route inventory |
 | HAProxy configs | read `/etc/haproxy/haproxy.cfg` | no route inventory |
@@ -513,7 +515,7 @@ GoReleaser produces the linux archives and `checksums.txt`.
 cmd/archaeologist/   CLI entrypoint
 cmd/bench/           golden-fixture benchmark
 internal/cli/        commands and output formatting
-internal/collector/  process, systemd, Docker, nginx, caddy, haproxy, traefik, apache, cron, git collectors
+internal/collector/  process, systemd, Docker, podman, containerd, nginx, caddy, haproxy, traefik, apache, cron, git collectors
 internal/store/      SQLite schema, evidence, graph, verdict persistence
 internal/verdict/    deterministic rule engine
 internal/rules/      embedded rules and overrides
