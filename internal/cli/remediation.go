@@ -34,6 +34,8 @@ var blindRemedies = map[string]blindRemedy{
 		"grant read access to the cron script (often root-owned), then rescan"},
 	"cron_source_unreadable": {remedyPermission,
 		"run as root (or grant read access) to read /etc/crontab and /etc/cron.*, then rescan"},
+	"dmi_unavailable": {remedyPermission,
+		"grant read access to the DMI id directory (/sys/class/dmi/id on sysfs) so the cloud platform can be identified, then rescan"},
 	"docker_log_unreadable": {remedyPermission,
 		"read container logs as root or with docker group membership, then rescan"},
 	"exec_start_unreadable": {remedyPermission,
@@ -42,6 +44,8 @@ var blindRemedies = map[string]blindRemedy{
 		"grant journal access: run as root or add the user to the systemd-journal group, then rescan"},
 	"mtime_unreadable": {remedyPermission,
 		"grant read/search permission on the path so file times can be read, then rescan"},
+	"resolv_conf_unreadable": {remedyPermission,
+		"grant read access to the resolv.conf file named in the detail (or restore it) so DNS resolvers can be inventoried, then rescan"},
 	"unit_file_unreadable": {remedyPermission,
 		"grant read access to the unit file (usually under /etc/systemd/system), then rescan"},
 

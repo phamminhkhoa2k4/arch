@@ -37,6 +37,8 @@ func TestRemedyForKnownReasons(t *testing.T) {
 		{"socket_unit_unreadable", remedyPermission, "socket unit file"},
 		{"socket_service_unresolved", remedyResolve, "Service="},
 		{"socket_unit_missing", remedyManual, "transient"},
+		{"resolv_conf_unreadable", remedyPermission, "resolv.conf"},
+		{"dmi_unavailable", remedyPermission, "sys/class/dmi/id"},
 		{"cron_env_unresolved", remedyResolve, "/etc/environment"},
 		{"log_retention_short", remedyLimitation, "no action"},
 		{"cron_schedule_unparsed", remedyManual, "manually"},

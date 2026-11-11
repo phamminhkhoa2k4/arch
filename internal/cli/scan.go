@@ -22,6 +22,7 @@ import (
 	hcoll "archaeologist/internal/collector/haproxy"
 	"archaeologist/internal/collector/listener"
 	mcoll "archaeologist/internal/collector/mtime"
+	"archaeologist/internal/collector/netdep"
 	ncoll "archaeologist/internal/collector/nginx"
 	pcoll "archaeologist/internal/collector/podman"
 	"archaeologist/internal/collector/process"
@@ -154,6 +155,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			listener.New(fs),
 			sysd.New(bus, loader, sIdx, systemd.NewExecJournal()),
 			sact.New(loader, saIdx),
+			netdep.New(nil),
 			dcoll.New(dengine.NewClient(dengine.DefaultSocket), compose.NewLoader(), dIdx),
 			pcoll.New(pIdx),
 			ctdcoll.New(ctdIdx),
