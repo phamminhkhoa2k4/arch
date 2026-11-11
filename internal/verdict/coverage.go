@@ -46,7 +46,9 @@ func notApplicable(in Input, ch string) bool {
 	case "docker_log":
 		// Only a running container can emit log lines.
 		return in.Kind == "container" && in.Attributes["state"] != "running"
-	case "docker_created":
+	case "podman_log":
+		return in.Kind == "podman_container" && in.Attributes["state"] != "running"
+	case "docker_created", "podman_created":
 		return in.Attributes["created_at"] == "" && in.Attributes["last_deploy_at"] == ""
 	case "listener_mapping":
 		// Mapping matters only where there is something to map.
@@ -63,6 +65,8 @@ func preconditionChecked(in Input, ch string) bool {
 	switch ch {
 	case "docker_log":
 		return in.Kind == "container" && in.Attributes["state"] == "running"
+	case "podman_log":
+		return in.Kind == "podman_container" && in.Attributes["state"] == "running"
 	case "listener_mapping":
 		// The correlated listens_on edge IS the resolved mapping for
 		// a subject that owns a port; listeners additionally prove it

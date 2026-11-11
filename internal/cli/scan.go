@@ -15,6 +15,7 @@ import (
 	acoll "archaeologist/internal/collector/accesslog"
 	apcoll "archaeologist/internal/collector/apache"
 	cdcoll "archaeologist/internal/collector/caddy"
+	ctdcoll "archaeologist/internal/collector/containerd"
 	ccoll "archaeologist/internal/collector/cron"
 	dcoll "archaeologist/internal/collector/docker"
 	gcoll "archaeologist/internal/collector/gitrepo"
@@ -22,6 +23,7 @@ import (
 	"archaeologist/internal/collector/listener"
 	mcoll "archaeologist/internal/collector/mtime"
 	ncoll "archaeologist/internal/collector/nginx"
+	pcoll "archaeologist/internal/collector/podman"
 	"archaeologist/internal/collector/process"
 	sysd "archaeologist/internal/collector/systemd"
 	tcoll "archaeologist/internal/collector/traefik"
@@ -81,10 +83,12 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 	loader := systemd.NewLoader(systemd.OSFS{})
 	// Order matters: the listener collector emits edges to process
 	// entities and the systemd collector reads the process snapshot, so
-	// both run after the process collector. The docker collector matches
-	// published ports against listeners and cgroup container ids, so it
-	// runs before nginx, which matches proxy targets against the same
-	// listener snapshot. The accesslog collector runs right after nginx:
+	// both run after the process collector. The docker and podman
+	// collectors match published ports against listeners and cgroup
+	// container ids, and the containerd collector matches its shim ids
+	// against the same cgroup snapshot, so all three run before nginx,
+	// which matches proxy targets against the same listener snapshot.
+	// The accesslog collector runs right after nginx:
 	// it attaches request evidence to the route entities nginx just
 	// emitted. The cron collector traces crontab references against the
 	// unit and container snapshots the earlier collectors recorded, and
@@ -98,6 +102,8 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 	type scanIndex interface {
 		sysd.ProcessIndex
 		dcoll.Index
+		pcoll.Index
+		ctdcoll.Index
 		ncoll.Index
 		ccoll.Index
 		cdcoll.Index
@@ -110,6 +116,8 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 	newCollectors := func(index scanIndex) []collector.Collector {
 		var sIdx sysd.ProcessIndex
 		var dIdx dcoll.Index
+		var pIdx pcoll.Index
+		var ctdIdx ctdcoll.Index
 		var nIdx ncoll.Index
 		var cIdx ccoll.Index
 		var cdIdx cdcoll.Index
@@ -121,6 +129,8 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 		if index != nil {
 			sIdx = index
 			dIdx = index
+			pIdx = index
+			ctdIdx = index
 			nIdx = index
 			cIdx = index
 			cdIdx = index
@@ -137,6 +147,8 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			listener.New(fs),
 			sysd.New(bus, loader, sIdx, systemd.NewExecJournal()),
 			dcoll.New(dengine.NewClient(dengine.DefaultSocket), compose.NewLoader(), dIdx),
+			pcoll.New(pIdx),
+			ctdcoll.New(ctdIdx),
 			ncoll.New(nginx.NewLoader(), nIdx),
 			acoll.New(nginx.NewLoader(), nil),
 			cdcoll.New(nil, cdIdx),

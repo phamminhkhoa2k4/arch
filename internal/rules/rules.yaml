@@ -38,3 +38,8 @@ coverage:
     image: [docker]
     volume: [docker]
     network: [docker]
+    podman_container: [podman, podman_created, podman_log, listener_mapping]
+    podman_image: [podman]
+    podman_volume: [podman]
+    podman_network: [podman]
+    containerd_container: [containerd]

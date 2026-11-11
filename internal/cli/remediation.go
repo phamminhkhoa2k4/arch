@@ -94,6 +94,12 @@ var blindRemedies = map[string]blindRemedy{
 		"grant read access to the included Apache config file or run as root, then rescan"},
 	"apache_target_unresolved": {remedyResolve,
 		"replace the placeholder with a concrete backend address, then rescan"},
+	"containerd_bundle_unreadable": {remedyPermission,
+		"run with sudo (or grant read access to the containerd bundle under /run/containerd), then rescan"},
+	"podman_api_unreadable": {remedyPermission,
+		"grant access to the Podman API socket (join the podman group or run podman system service as root), then rescan"},
+	"podman_log_unreadable": {remedyPermission,
+		"read container logs as root or with podman group membership, then rescan"},
 
 	// Source limitations: no action can widen the view.
 	"log_driver_unsupported": {remedyLimitation,
@@ -104,6 +110,8 @@ var blindRemedies = map[string]blindRemedy{
 	// Manual inspection: the parser cannot go further on its own.
 	"collector_error": {remedyManual,
 		"check the collector error detail, fix the cause, and re-run the scan"},
+	"containerd_shim_unparsed": {remedyManual,
+		"inspect the shim process manually; its namespace/id flags could not be parsed, then rescan"},
 	"cron_schedule_unparsed": {remedyManual,
 		"review the cron schedule manually; the parser could not interpret it"},
 	"cron_script_unanalyzable": {remedyManual,

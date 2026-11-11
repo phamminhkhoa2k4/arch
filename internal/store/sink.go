@@ -369,12 +369,13 @@ func (k *ScanSink) PathRows() ([]collector.PathRow, error) {
 	return out, nil
 }
 
-// ContainerRows returns every container of this scan with identity,
-// name and image — the input for command-to-container matching (cron).
+// ContainerRows returns every container of this scan (docker and
+// podman) with identity, name and image — the input for
+// command-to-container matching (cron).
 func (k *ScanSink) ContainerRows() ([]collector.ContainerRow, error) {
 	rows, err := k.s.db.QueryContext(k.ctx,
 		`SELECT identity_key, name, attributes_json FROM entities
-		 WHERE scan_id = ? AND kind = 'container' ORDER BY identity_key`, k.scanID)
+		 WHERE scan_id = ? AND kind IN ('container', 'podman_container') ORDER BY identity_key`, k.scanID)
 	if err != nil {
 		return nil, fmt.Errorf("container rows: %w", err)
 	}

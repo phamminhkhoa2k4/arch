@@ -351,8 +351,13 @@ func neighborRunning(n Neighbor) bool {
 	switch n.Kind {
 	case "systemd_unit":
 		return n.Attributes["active_state"] == "active"
-	case "container":
+	case "container", "podman_container":
 		return n.Attributes["state"] == "running"
+	case "containerd_container":
+		// The entity exists only while its shim does, and a shim
+		// lives exactly as long as the container task: presence is
+		// the liveness proof even when the bundle state is unreadable.
+		return true
 	case "process":
 		return contains(n.InUseChannels, "procfs")
 	default:

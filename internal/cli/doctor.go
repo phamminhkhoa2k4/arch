@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strconv"
 
+	ctdcoll "archaeologist/internal/collector/containerd"
+	pcoll "archaeologist/internal/collector/podman"
 	"archaeologist/internal/procfs"
 	"archaeologist/internal/store"
 )
@@ -38,6 +40,18 @@ func realChecks(dbPath string) []doctorCheck {
 			fail: "Cannot access the Docker socket",
 			hint: "sudo usermod -aG docker $USER then log in again, or run with sudo",
 			run:  checkUnixSocket("/var/run/docker.sock"),
+		},
+		{
+			pass: "Podman socket (rootful or rootless)",
+			fail: "Podman is installed but its API socket is not accessible",
+			hint: "join the podman group or run podman system service as root, then rescan",
+			run:  checkPodmanSocket(),
+		},
+		{
+			pass: "Containerd bundle state (/run/containerd)",
+			fail: "Cannot read a containerd bundle state",
+			hint: "run with sudo — otherwise containerd containers appear with an UNKNOWN state",
+			run:  ctdcoll.ProbeBundleAccess,
 		},
 		{
 			pass: "D-Bus systemd",
@@ -155,6 +169,34 @@ func checkUnixSocket(path string) func() error {
 			return err
 		}
 		return conn.Close()
+	}
+}
+
+// checkPodmanSocket probes the Podman API sockets in preference
+// order. A host without podman has no socket: that passes, because
+// an absent collector is not a gap. An existing socket the user
+// cannot connect to is the real access failure.
+func checkPodmanSocket() func() error {
+	return func() error {
+		var firstErr error
+		found := false
+		for _, p := range pcoll.Sockets() {
+			conn, err := net.Dial("unix", p)
+			if err == nil {
+				_ = conn.Close()
+				return nil
+			}
+			if _, statErr := os.Stat(p); statErr == nil {
+				found = true
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
+		}
+		if found {
+			return firstErr
+		}
+		return nil
 	}
 }
 

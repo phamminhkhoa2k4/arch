@@ -34,7 +34,7 @@ func signals(in Input, r rules.Rules, now time.Time) []Item {
 					RawRef:     e.RawRef,
 				})
 			}
-		case "docker_created":
+		case "docker_created", "podman_created":
 			ts := e.Value["last_deploy_at"]
 			if ts == "" {
 				ts = e.Value["created_at"]
@@ -56,7 +56,7 @@ func signals(in Input, r rules.Rules, now time.Time) []Item {
 					RawRef:     e.RawRef,
 				})
 			}
-		case "docker":
+		case "docker", "podman", "containerd":
 			if st := e.Value["state"]; st != "" && st != "running" {
 				add("S_container_state", Item{
 					Code:       "S4",
