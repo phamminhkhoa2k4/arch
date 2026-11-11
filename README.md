@@ -33,7 +33,8 @@ a **blind spot**, never a guess.
 
 ## What it does
 
-- **Discovers** processes, listeners, systemd units, Docker and Compose
+- **Discovers** processes, listeners, systemd units (including socket
+  activation), Docker and Compose
   projects, Podman and containerd containers, nginx routes, cron jobs and
   timers, scripts, git repositories, and CI metadata.
 - **Correlates** them into an evidence-backed dependency graph.
@@ -515,7 +516,7 @@ GoReleaser produces the linux archives and `checksums.txt`.
 cmd/archaeologist/   CLI entrypoint
 cmd/bench/           golden-fixture benchmark
 internal/cli/        commands and output formatting
-internal/collector/  process, systemd, Docker, podman, containerd, nginx, caddy, haproxy, traefik, apache, cron, git collectors
+internal/collector/  process, systemd, socket activation, Docker, podman, containerd, nginx, caddy, haproxy, traefik, apache, cron, git collectors
 internal/store/      SQLite schema, evidence, graph, verdict persistence
 internal/verdict/    deterministic rule engine
 internal/rules/      embedded rules and overrides
