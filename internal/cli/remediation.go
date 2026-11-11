@@ -100,6 +100,10 @@ var blindRemedies = map[string]blindRemedy{
 		"grant access to the Podman API socket (join the podman group or run podman system service as root), then rescan"},
 	"podman_log_unreadable": {remedyPermission,
 		"read container logs as root or with podman group membership, then rescan"},
+	"socket_unit_unreadable": {remedyPermission,
+		"grant read access to the socket unit file (usually under /etc/systemd/system or /usr/lib/systemd/system), then rescan"},
+	"socket_service_unresolved": {remedyResolve,
+		"replace the variable or specifier referenced by Service= with a concrete unit name, then rescan"},
 
 	// Source limitations: no action can widen the view.
 	"log_driver_unsupported": {remedyLimitation,
@@ -122,6 +126,8 @@ var blindRemedies = map[string]blindRemedy{
 		"identify the ExecStart target manually (its type is not recognised), then rescan"},
 	"parse_error": {remedyManual,
 		"inspect the process manually; its identity could not be parsed"},
+	"socket_unit_missing": {remedyManual,
+		"inspect the transient socket unit manually; it has no unit file on disk"},
 	"timer_calendar_unparsed": {remedyManual,
 		"review the systemd timer OnCalendar line manually"},
 }

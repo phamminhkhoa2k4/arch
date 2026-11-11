@@ -25,6 +25,7 @@ import (
 	ncoll "archaeologist/internal/collector/nginx"
 	pcoll "archaeologist/internal/collector/podman"
 	"archaeologist/internal/collector/process"
+	sact "archaeologist/internal/collector/socketactivation"
 	sysd "archaeologist/internal/collector/systemd"
 	tcoll "archaeologist/internal/collector/traefik"
 	"archaeologist/internal/compose"
@@ -83,7 +84,10 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 	loader := systemd.NewLoader(systemd.OSFS{})
 	// Order matters: the listener collector emits edges to process
 	// entities and the systemd collector reads the process snapshot, so
-	// both run after the process collector. The docker and podman
+	// both run after the process collector. The socket activation
+	// collector correlates socket units and their declared addresses
+	// against the unit and listener snapshots, so it runs right after
+	// systemd. The docker and podman
 	// collectors match published ports against listeners and cgroup
 	// container ids, and the containerd collector matches its shim ids
 	// against the same cgroup snapshot, so all three run before nginx,
@@ -112,6 +116,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 		gcoll.Index
 		tcoll.Index
 		apcoll.Index
+		sact.Index
 	}
 	newCollectors := func(index scanIndex) []collector.Collector {
 		var sIdx sysd.ProcessIndex
@@ -126,6 +131,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 		var gIdx gcoll.Index
 		var tIdx tcoll.Index
 		var apIdx apcoll.Index
+		var saIdx sact.Index
 		if index != nil {
 			sIdx = index
 			dIdx = index
@@ -139,6 +145,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			gIdx = index
 			tIdx = index
 			apIdx = index
+			saIdx = index
 		}
 		cc := ccoll.New(systemd.OSFS{}, cIdx)
 		cc.SetLastRun(ccoll.NewExecLastRun())
@@ -146,6 +153,7 @@ func runScan(ctx context.Context, w, errW io.Writer, dbPath, toolVersion, format
 			process.New(fs),
 			listener.New(fs),
 			sysd.New(bus, loader, sIdx, systemd.NewExecJournal()),
+			sact.New(loader, saIdx),
 			dcoll.New(dengine.NewClient(dengine.DefaultSocket), compose.NewLoader(), dIdx),
 			pcoll.New(pIdx),
 			ctdcoll.New(ctdIdx),

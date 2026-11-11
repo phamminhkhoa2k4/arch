@@ -297,6 +297,13 @@ func blockerB6(in Input) []Item {
 				EvidenceID: e.EvidenceID,
 				RawRef:     e.RawRef,
 			})
+		case e.Dir == "in" && e.Kind == "activates" && neighborRunning(e.Neighbor):
+			out = append(out, Item{
+				Code:       "B6",
+				Text:       fmt.Sprintf("socket unit %q (active) activates this entity on demand", e.Neighbor.Name),
+				EvidenceID: e.EvidenceID,
+				RawRef:     e.RawRef,
+			})
 		}
 	}
 	return out

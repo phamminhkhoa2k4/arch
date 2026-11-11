@@ -1,6 +1,10 @@
 package verdict
 
-import "archaeologist/internal/rules"
+import (
+	"strings"
+
+	"archaeologist/internal/rules"
+)
 
 // coverage computes Evidence Coverage (D2): which configured channels
 // apply to this entity, which were checked, which are missing, and
@@ -53,6 +57,9 @@ func notApplicable(in Input, ch string) bool {
 	case "listener_mapping":
 		// Mapping matters only where there is something to map.
 		return !hasListenEdge(in) && in.Kind != "listener"
+	case "systemd_socket":
+		// Activation facts exist only for socket units.
+		return in.Kind == "systemd_unit" && !strings.HasSuffix(in.Name, ".socket")
 	}
 	return false
 }

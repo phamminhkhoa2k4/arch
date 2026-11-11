@@ -21,7 +21,7 @@ coverage:
   channels:
     listener: [procfs_net, listener_mapping]
     process: [procfs]
-    systemd_unit: [systemd, journald, listener_mapping]
+    systemd_unit: [systemd, journald, listener_mapping, systemd_socket]
     container: [docker, docker_created, docker_log, listener_mapping]
     compose_service: [docker]
     cron_job: [cron]

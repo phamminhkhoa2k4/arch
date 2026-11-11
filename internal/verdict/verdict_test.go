@@ -338,6 +338,16 @@ func TestB6RunningSubjectsBlock(t *testing.T) {
 			Neighbor: Neighbor{Kind: "container", Name: "lab-api",
 				Attributes: map[string]string{"state": "running"}},
 		}, true},
+		{"active socket unit activates subject", EdgeFact{
+			Kind: "activates", Strength: "deterministic", Dir: "in",
+			Neighbor: Neighbor{Kind: "systemd_unit", Name: "lab.socket",
+				Attributes: map[string]string{"active_state": "active"}},
+		}, true},
+		{"inactive socket unit activates subject", EdgeFact{
+			Kind: "activates", Strength: "deterministic", Dir: "in",
+			Neighbor: Neighbor{Kind: "systemd_unit", Name: "lab.socket",
+				Attributes: map[string]string{"active_state": "inactive"}},
+		}, false},
 		{"weak edge never blocks", EdgeFact{
 			Kind: "listens_on", Strength: "weak_heuristic", Dir: "in",
 			Neighbor: Neighbor{Kind: "listener", Name: "0.0.0.0:9090", InUseChannels: []string{"procfs_net"}},
@@ -574,6 +584,49 @@ func TestUnitStateSignal(t *testing.T) {
 	// no blockers → ORPHANED.
 	if res.State != StateOrphaned {
 		t.Errorf("state = %s, want ORPHANED", res.State)
+	}
+}
+
+// The socket-activation channel applies only to socket units: a
+// service unit never has it checked or missing, while a socket unit
+// without socket evidence carries it as a coverage gap.
+func TestCoverageSocketChannelScope(t *testing.T) {
+	r := defaultRules(t)
+
+	svc := baseInput("systemd_unit")
+	svc.Name = "lab.service"
+	svc.IdentityKey = "systemd_unit|lab.service"
+	svc.Evidence = []Evidence{
+		ev(1, "systemd", "neutral", "deterministic",
+			map[string]string{"active_state": "inactive", "file_state": "enabled"}),
+	}
+	res := Compute(svc, r, now)
+	for _, ch := range res.Applicable {
+		if ch == "systemd_socket" {
+			t.Errorf("systemd_socket must not apply to a service unit: %v", res.Applicable)
+		}
+	}
+
+	sock := baseInput("systemd_unit")
+	sock.Name = "lab.socket"
+	sock.IdentityKey = "systemd_unit|lab.socket"
+	sock.Evidence = []Evidence{
+		ev(1, "systemd", "neutral", "deterministic",
+			map[string]string{"active_state": "inactive", "file_state": "enabled"}),
+	}
+	res = Compute(sock, r, now)
+	found := false
+	for _, ch := range res.Applicable {
+		if ch == "systemd_socket" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("systemd_socket must apply to a socket unit: %v", res.Applicable)
+	}
+	joined := strings.Join(res.Missing, ",")
+	if !strings.Contains(joined, "systemd_socket") {
+		t.Errorf("missing = %v, want systemd_socket gap for a socket unit without evidence", res.Missing)
 	}
 }
 
